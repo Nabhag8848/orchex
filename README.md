@@ -2,7 +2,7 @@
 
 # Orchex
 
-**A durable workflow builder designed one decision at a time**
+**A durable workflow execution engine designed one decision at a time**
 
 Build a graph. Publish an immutable version. Run it reliably. Resume exactly where it failed.
 
@@ -10,7 +10,7 @@ Build a graph. Publish an immutable version. Run it reliably. Resume exactly whe
 
 ---
 
-Orchex is a workflow builder. A user draws a flow, publishes it, and asks us to run it reliably.
+Orchex is a workflow execution engine. A user draws a flow, publishes it, and asks us to run it reliably.
 
 That sounds simple until the first practical questions arrive. What happens while a user is halfway through drawing an invalid graph? Which version should a run use if the workflow is edited while it is running? If one API call fails after three successful steps, do we start everything again? And how do we keep this understandable when the system grows from a handful of runs to a million a day?
 
@@ -263,7 +263,7 @@ Execution checkpoints need strong correctness. Observability can be eventually c
 - **Step Functions** fits an AWS-native internal tool — you define a state machine and AWS runs and persists it.
 - **Temporal** fits an internal system that wants a mature durable-execution engine (history, replay, activities) without building that layer from scratch.
 
-Orchex is itself a workflow-builder product, so it needs to own DAG progression, branching, checkpoints, retries, and the builder semantics. We take the queues-and-workers path, and use sandboxes like Durable Lambda only for isolating untrusted function code — not as the orchestrator.
+Orchex is itself a workflow execution engine, so it needs to own DAG progression, branching, checkpoints, retries, and the builder semantics. We take the queues-and-workers path, and use sandboxes like Durable Lambda only for isolating untrusted function code — not as the orchestrator.
 
 The selected design is a queue-and-worker control plane, with isolated execution only where a node requires it. Where that control plane runs — **ECS on Fargate** — is discussed in the [control plane compute deep dive](#9-deep-dive-design-control-plane-compute). How Function-node JS is stored and sandboxed is discussed in the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
 
