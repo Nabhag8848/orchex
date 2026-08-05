@@ -12,14 +12,14 @@ Local harness to load-test the Orchex schema with an Orchex-shaped write mix.
 ## Quick start
 
 ```bash
-cd bench/postgres
+cd docs/bench/postgres
 docker compose down -v
 docker compose up -d --build
 # wait until healthy, then:
 docker compose exec postgres /bench/run_all_benchmarks.sh
 ```
 
-Report: `bench/postgres/results/BENCHMARK_RESULTS.md`
+Report: `docs/bench/postgres/results/BENCHMARK_RESULTS.md`
 
 ## Note
 

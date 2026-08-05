@@ -13,7 +13,7 @@ go run .
 From the repo root:
 
 ```bash
-go run ./data-structure/
+go run ./docs/data-structure/
 ```
 
 Do **not** run `main.go` alone — `Graph` and `WorkflowGraph` live in separate files in the same `package main`.
