@@ -1,0 +1,82 @@
+# --- Go ---
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+/build/
+/tmp/
+
+# Coverage / profiling
+*.cover
+*.coverage
+coverage.html
+coverage.txt
+coverage.out
+profile.out
+cpu.out
+mem.out
+
+# Go workspace (local only; keep go.work.sum ignored if you use go.work locally)
+go.work
+go.work.sum
+
+# Dependency dirs (rare; modules use go.mod)
+/vendor/
+
+# --- Terraform (infra/) ---
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+!example.tfvars
+!example.tfvars.json
+.terraformrc
+terraform.rc
+*.tfplan
+tfplan
+plan.out
+
+# --- Env / secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets/
+
+# --- Docker ---
+# local build artifacts if any
+docker-compose.override.yml
+
+# --- IDE / editors ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# --- Logs / misc ---
+*.log
+logs/

@@ -1,0 +1,58 @@
+# --- VCS / editor ---
+.git
+.gitignore
+.gitattributes
+.github
+.cursor
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# --- Docs / non-build ---
+docs
+*.md
+LICENSE
+CHANGELOG*
+.editorconfig
+
+# --- Infra (not needed for go build) ---
+infra
+
+# --- Env / secrets ---
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets
+
+# --- Go build / test artifacts ---
+bin
+dist
+build
+tmp
+vendor
+*.exe
+*.test
+*.out
+*.cover
+*.coverage
+coverage.html
+coverage.txt
+coverage.out
+profile.out
+cpu.out
+mem.out
+go.work
+go.work.sum
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Logs / local overrides ---
+*.log
+logs
+docker-compose.override.yml
