@@ -4,3 +4,9 @@ module "ecr_builder_api" {
 
   repository_name = "orchex-builder-api"
 }
+
+module "alb" {
+  source = "./modules/alb"
+
+  name = "orchex-alb"
+}

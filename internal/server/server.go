@@ -12,6 +12,6 @@ func NewServer() *echo.Echo {
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
 	
-	e.GET("/health", handler.Health)
+	e.GET("/health/builder", handler.Health)
 	return e
 }
