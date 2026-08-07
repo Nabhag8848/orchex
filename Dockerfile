@@ -9,15 +9,15 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/api ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/builder-api ./cmd/builder-api
 
 # --- run ---
 FROM gcr.io/distroless/static-debian12:nonroot
 
-COPY --from=build /out/api /api
+COPY --from=build /out/builder-api /builder-api
 
 EXPOSE 8080
 
 USER nonroot:nonroot
 
-ENTRYPOINT ["/api"]
+ENTRYPOINT ["/builder-api"]
