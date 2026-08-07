@@ -24,3 +24,59 @@ output "alb" {
     route53_records    = module.alb.route53_records
   }
 }
+
+output "ecs" {
+  description = "Shared ECS Fargate cluster"
+  value = {
+    arn                               = module.ecs.arn
+    id                                = module.ecs.id
+    name                              = module.ecs.name
+    capacity_providers                = module.ecs.capacity_providers
+    cloudwatch_log_group_arn          = module.ecs.cloudwatch_log_group_arn
+    cloudwatch_log_group_name         = module.ecs.cloudwatch_log_group_name
+    cluster_capacity_providers        = module.ecs.cluster_capacity_providers
+    infrastructure_iam_role_arn       = module.ecs.infrastructure_iam_role_arn
+    infrastructure_iam_role_name      = module.ecs.infrastructure_iam_role_name
+    infrastructure_iam_role_unique_id = module.ecs.infrastructure_iam_role_unique_id
+    node_iam_instance_profile_arn     = module.ecs.node_iam_instance_profile_arn
+    node_iam_instance_profile_id      = module.ecs.node_iam_instance_profile_id
+    node_iam_instance_profile_unique  = module.ecs.node_iam_instance_profile_unique
+    node_iam_role_arn                 = module.ecs.node_iam_role_arn
+    node_iam_role_name                = module.ecs.node_iam_role_name
+    node_iam_role_unique_id           = module.ecs.node_iam_role_unique_id
+    task_exec_iam_role_arn            = module.ecs.task_exec_iam_role_arn
+    task_exec_iam_role_name           = module.ecs.task_exec_iam_role_name
+    task_exec_iam_role_unique_id      = module.ecs.task_exec_iam_role_unique_id
+  }
+}
+
+output "ecs_builder_api" {
+  description = "ECS service for the workflow builder API"
+  value = {
+    id                            = module.ecs_builder_api.id
+    name                          = module.ecs_builder_api.name
+    iam_role_name                 = module.ecs_builder_api.iam_role_name
+    iam_role_arn                  = module.ecs_builder_api.iam_role_arn
+    iam_role_unique_id            = module.ecs_builder_api.iam_role_unique_id
+    container_definitions         = module.ecs_builder_api.container_definitions
+    task_definition_arn           = module.ecs_builder_api.task_definition_arn
+    task_definition_revision      = module.ecs_builder_api.task_definition_revision
+    task_definition_family        = module.ecs_builder_api.task_definition_family
+    task_exec_iam_role_name       = module.ecs_builder_api.task_exec_iam_role_name
+    task_exec_iam_role_arn        = module.ecs_builder_api.task_exec_iam_role_arn
+    task_exec_iam_role_unique_id  = module.ecs_builder_api.task_exec_iam_role_unique_id
+    tasks_iam_role_name           = module.ecs_builder_api.tasks_iam_role_name
+    tasks_iam_role_arn            = module.ecs_builder_api.tasks_iam_role_arn
+    tasks_iam_role_unique_id      = module.ecs_builder_api.tasks_iam_role_unique_id
+    task_set_id                   = module.ecs_builder_api.task_set_id
+    task_set_arn                  = module.ecs_builder_api.task_set_arn
+    task_set_stability_status     = module.ecs_builder_api.task_set_stability_status
+    task_set_status               = module.ecs_builder_api.task_set_status
+    autoscaling_policies          = module.ecs_builder_api.autoscaling_policies
+    autoscaling_scheduled_actions = module.ecs_builder_api.autoscaling_scheduled_actions
+    security_group_arn            = module.ecs_builder_api.security_group_arn
+    security_group_id             = module.ecs_builder_api.security_group_id
+    infrastructure_iam_role_arn   = module.ecs_builder_api.infrastructure_iam_role_arn
+    infrastructure_iam_role_name  = module.ecs_builder_api.infrastructure_iam_role_name
+  }
+}

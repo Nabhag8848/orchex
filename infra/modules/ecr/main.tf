@@ -39,6 +39,6 @@ module "this" {
   })
 
   tags = {
-    Service = "orchex-builder-api"
+    Service = var.repository_name
   }
 }

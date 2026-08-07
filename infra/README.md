@@ -72,7 +72,7 @@ REGION=ap-south-1   # must match var.aws_region
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "$(echo "$REPO_URL" | cut -d/ -f1)"
 
-# Build from the repository root, tagged for ECR
+# Build from the repository root, tagged for ECR (amd64 is pinned in the Dockerfile)
 cd ..
 docker build -t "${REPO_URL}:latest" .
 
@@ -86,4 +86,3 @@ aws ecr describe-images \
   --repository-name "$(cd infra && terraform output -json ecr_builder_api | jq -r '.repository_name')" \
   --region "$REGION"
 ```
-
