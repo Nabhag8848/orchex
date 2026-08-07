@@ -11,11 +11,25 @@ module "this" {
     rules = [
       {
         rulePriority = 1
-        description  = "Keep last 1 image"
+        description  = "Expire untagged images (left behind when latest is retagged)"
         selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
           countNumber = 1
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep only the newest tagged image"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 1
         }
         action = {
           type = "expire"
