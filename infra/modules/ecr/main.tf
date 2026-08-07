@@ -5,6 +5,7 @@ module "this" {
   repository_name                 = var.repository_name
   repository_type                 = "private"
   repository_image_tag_mutability = "MUTABLE"
+  repository_force_delete         = true
 
   repository_lifecycle_policy = jsonencode({
     rules = [
@@ -24,6 +25,6 @@ module "this" {
   })
 
   tags = {
-    Service = "api"
+    Service = "orchex-builder-api"
   }
 }

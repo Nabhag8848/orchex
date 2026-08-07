@@ -1,6 +1,6 @@
 # Orchex infrastructure
 
-Terraform for AWS resources. Currently provisions **ECR** for the API container image.
+Terraform for AWS resources. Currently provisions **ECR** for the workflow builder API (`orchex-builder-api`).
 
 Terraform creates the repository only. Building and pushing the image is done with Docker + the AWS CLI.
 
@@ -11,7 +11,7 @@ infra/
   terraform.tf      # required Terraform / provider versions
   providers.tf      # AWS provider (region, profile, default tags)
   variables.tf      # shared variables (e.g. region)
-  main.tf           # root modules (ECR API)
+  main.tf           # root modules (ECR builder API)
   outputs.tf        # root outputs
   modules/
     ecr/            # reusable ECR module
@@ -48,7 +48,7 @@ Inspect outputs:
 
 ```bash
 terraform output
-terraform output -json ecr_api
+terraform output -json ecr_builder_api
 ```
 
 | Field                    | Meaning                                                 |
@@ -58,14 +58,14 @@ terraform output -json ecr_api
 | `repository_arn`         | Full ARN                                                |
 | `repository_registry_id` | Registry / account ID                                   |
 
-## 2. Build and push the API image
+## 2. Build and push the builder API image
 
 Use the same region as `var.aws_region`. In **zsh**, always write `${REPO_URL}:tag` (not `$REPO_URL:tag`).
 
 ```bash
 cd infra
 
-REPO_URL=$(terraform output -json ecr_api | jq -r '.repository_url')
+REPO_URL=$(terraform output -json ecr_builder_api | jq -r '.repository_url')
 REGION=ap-south-1   # must match var.aws_region
 
 # Username is always "AWS". Password is a short-lived token from the CLI.
@@ -83,7 +83,7 @@ Confirm the image landed in ECR:
 
 ```bash
 aws ecr describe-images \
-  --repository-name "$(cd infra && terraform output -json ecr_api | jq -r '.repository_name')" \
+  --repository-name "$(cd infra && terraform output -json ecr_builder_api | jq -r '.repository_name')" \
   --region "$REGION"
 ```
 
