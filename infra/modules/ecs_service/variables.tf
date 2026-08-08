@@ -45,3 +45,15 @@ variable "desired_count" {
   description = "Number of tasks to keep running"
   default     = 1
 }
+
+variable "target_group_arn" {
+  type        = string
+  description = "ALB target group ARN; ECS registers task IPs automatically"
+  nullable    = false
+}
+
+variable "alb_security_group_id" {
+  type        = string
+  description = "ALB security group allowed to reach the container port"
+  nullable    = false
+}

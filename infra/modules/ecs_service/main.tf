@@ -41,14 +41,20 @@ module "this" {
     }
   }
 
-  # Temporary: open the app port so you can hit the task public IP.
-  # Later: restrict to the ALB security group only.
+  load_balancer = {
+    alb = {
+      target_group_arn = var.target_group_arn
+      container_name   = var.container_name
+      container_port   = var.container_port
+    }
+  }
+
   security_group_ingress_rules = {
     app = {
-      from_port   = var.container_port
-      to_port     = var.container_port
-      ip_protocol = "tcp"
-      cidr_ipv4   = "0.0.0.0/0"
+      from_port                    = var.container_port
+      to_port                      = var.container_port
+      ip_protocol                  = "tcp"
+      referenced_security_group_id = var.alb_security_group_id
     }
   }
 

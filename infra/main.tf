@@ -24,4 +24,7 @@ module "ecs_builder_api" {
   cluster_arn    = module.ecs.arn
   container_name = "builder-api"
   image          = "${module.ecr_builder_api.repository_url}:latest"
+
+  target_group_arn      = module.alb.target_groups["builder"].arn
+  alb_security_group_id = module.alb.security_group_id
 }

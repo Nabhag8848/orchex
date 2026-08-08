@@ -39,10 +39,24 @@ module "this" {
     http = {
       port     = 80
       protocol = "HTTP"
-      fixed_response = {
-        content_type = "application/json"
-        message_body = "{\"status\":\"ok\"}"
-        status_code  = "200"
+      forward = {
+        target_group_key = "builder"
+      }
+    }
+  }
+
+  target_groups = {
+    builder = {
+      name              = "orchex-builder-api"
+      protocol          = "HTTP"
+      port              = 8080
+      target_type       = "ip"
+      create_attachment = false
+      health_check = {
+        enabled  = true
+        path     = "/health/builder"
+        protocol = "HTTP"
+        matcher  = "200"
       }
     }
   }
