@@ -57,3 +57,15 @@ variable "alb_security_group_id" {
   description = "ALB security group allowed to reach the container port"
   nullable    = false
 }
+
+variable "data_plane_client_security_group_id" {
+  type        = string
+  description = "Shared ECS data plane client security group attached to task ENIs for RDS access"
+  nullable    = false
+}
+
+variable "service" {
+  type        = string
+  description = "Logical service name for tagging"
+  nullable    = false
+}

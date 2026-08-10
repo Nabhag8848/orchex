@@ -92,3 +92,13 @@ output "node_iam_instance_profile_unique" {
   description = "Stable and unique string identifying the IAM instance profile"
   value       = module.this.node_iam_instance_profile_unique
 }
+
+output "data_plane_client_security_group_id" {
+  description = "Shared client security group attached to ECS task ENIs for data plane access"
+  value       = aws_security_group.data_plane_client.id
+}
+
+output "data_plane_client_security_group_arn" {
+  description = "ARN of the shared ECS data plane client security group"
+  value       = aws_security_group.data_plane_client.arn
+}

@@ -62,6 +62,8 @@ module "this" {
   }
 
   tags = {
-    Service = var.name
+    Service   = var.service
+    Component = "alb"
+    Name      = var.name
   }
 }

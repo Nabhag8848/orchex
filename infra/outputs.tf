@@ -28,25 +28,44 @@ output "alb" {
 output "ecs" {
   description = "Shared ECS Fargate cluster"
   value = {
-    arn                               = module.ecs.arn
-    id                                = module.ecs.id
-    name                              = module.ecs.name
-    capacity_providers                = module.ecs.capacity_providers
-    cloudwatch_log_group_arn          = module.ecs.cloudwatch_log_group_arn
-    cloudwatch_log_group_name         = module.ecs.cloudwatch_log_group_name
-    cluster_capacity_providers        = module.ecs.cluster_capacity_providers
-    infrastructure_iam_role_arn       = module.ecs.infrastructure_iam_role_arn
-    infrastructure_iam_role_name      = module.ecs.infrastructure_iam_role_name
-    infrastructure_iam_role_unique_id = module.ecs.infrastructure_iam_role_unique_id
-    node_iam_instance_profile_arn     = module.ecs.node_iam_instance_profile_arn
-    node_iam_instance_profile_id      = module.ecs.node_iam_instance_profile_id
-    node_iam_instance_profile_unique  = module.ecs.node_iam_instance_profile_unique
-    node_iam_role_arn                 = module.ecs.node_iam_role_arn
-    node_iam_role_name                = module.ecs.node_iam_role_name
-    node_iam_role_unique_id           = module.ecs.node_iam_role_unique_id
-    task_exec_iam_role_arn            = module.ecs.task_exec_iam_role_arn
-    task_exec_iam_role_name           = module.ecs.task_exec_iam_role_name
-    task_exec_iam_role_unique_id      = module.ecs.task_exec_iam_role_unique_id
+    arn                                  = module.ecs.arn
+    id                                   = module.ecs.id
+    name                                 = module.ecs.name
+    capacity_providers                   = module.ecs.capacity_providers
+    cloudwatch_log_group_arn             = module.ecs.cloudwatch_log_group_arn
+    cloudwatch_log_group_name            = module.ecs.cloudwatch_log_group_name
+    cluster_capacity_providers           = module.ecs.cluster_capacity_providers
+    infrastructure_iam_role_arn          = module.ecs.infrastructure_iam_role_arn
+    infrastructure_iam_role_name         = module.ecs.infrastructure_iam_role_name
+    infrastructure_iam_role_unique_id    = module.ecs.infrastructure_iam_role_unique_id
+    node_iam_instance_profile_arn        = module.ecs.node_iam_instance_profile_arn
+    node_iam_instance_profile_id         = module.ecs.node_iam_instance_profile_id
+    node_iam_instance_profile_unique     = module.ecs.node_iam_instance_profile_unique
+    node_iam_role_arn                    = module.ecs.node_iam_role_arn
+    node_iam_role_name                   = module.ecs.node_iam_role_name
+    node_iam_role_unique_id              = module.ecs.node_iam_role_unique_id
+    task_exec_iam_role_arn               = module.ecs.task_exec_iam_role_arn
+    task_exec_iam_role_name              = module.ecs.task_exec_iam_role_name
+    task_exec_iam_role_unique_id         = module.ecs.task_exec_iam_role_unique_id
+    data_plane_client_security_group_id  = module.ecs.data_plane_client_security_group_id
+    data_plane_client_security_group_arn = module.ecs.data_plane_client_security_group_arn
+  }
+}
+
+output "rds" {
+  description = "PostgreSQL RDS instance (connection metadata only; credentials stay in Secrets Manager)"
+  value = {
+    db_instance_endpoint              = module.rds.db_instance_endpoint
+    db_instance_address               = module.rds.db_instance_address
+    db_instance_port                  = module.rds.db_instance_port
+    db_instance_name                  = module.rds.db_instance_name
+    db_instance_identifier            = module.rds.db_instance_identifier
+    db_instance_arn                   = module.rds.db_instance_arn
+    db_instance_status                = module.rds.db_instance_status
+    db_instance_engine                = module.rds.db_instance_engine
+    db_instance_engine_version_actual = module.rds.db_instance_engine_version_actual
+    db_subnet_group_id                = module.rds.db_subnet_group_id
+    security_group_id                 = module.rds.security_group_id
   }
 }
 

@@ -4,7 +4,7 @@ provider "aws" {
   default_tags {
     tags = {
       Project     = "orchex"
-      Environment = "production"
+      Environment = var.environment
     }
   }
 }

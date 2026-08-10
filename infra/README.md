@@ -1,6 +1,6 @@
 # Orchex infrastructure
 
-Terraform for AWS resources. Provisions **ECR**, an **Application Load Balancer (ALB)**, a shared **ECS Fargate cluster**, and an **ECS service** for the workflow builder API (`orchex-builder-api`).
+Terraform for AWS resources. Provisions **ECR**, an **Application Load Balancer (ALB)**, a shared **ECS Fargate cluster**, an **ECS service** for the workflow builder API (`orchex-builder-api`), and **RDS PostgreSQL** (`orchex-postgres`).
 
 Terraform creates and wires the infrastructure. Building and pushing the container image is done with Docker + the AWS CLI.
 
@@ -10,14 +10,15 @@ Terraform creates and wires the infrastructure. Building and pushing the contain
 infra/
   terraform.tf      # required Terraform / provider versions
   providers.tf      # AWS provider (region, profile, default tags)
-  variables.tf      # shared variables (e.g. region)
-  main.tf           # root modules (ECR, ALB, ECS, ECS service)
+  variables.tf      # shared variables (region, environment)
+  main.tf           # root modules (ECR, ALB, ECS, ECS service, RDS)
   outputs.tf        # root outputs
   modules/
     ecr/            # ECR repository for container images
     alb/            # internet-facing ALB + target group
-    ecs/            # shared Fargate cluster
+    ecs/            # shared Fargate cluster + data_plane_client SG
     ecs_service/    # Fargate service (task definition, SG, ALB attachment)
+    rds/            # PostgreSQL RDS (subnet group, SG, instance)
 ```
 
 ## Prerequisites
@@ -58,9 +59,29 @@ Default region is `ap-south-1` (`var.aws_region`). Override when needed:
 terraform apply -var='aws_region=YOUR_REGION'
 ```
 
+Default environment is `production` (`var.environment`). Override when needed:
+
+```bash
+terraform apply -var='environment=staging'
+```
+
+## Tagging
+
+All resources receive provider default tags plus module-level tags:
+
+| Tag           | Source            | Example values                            |
+| ------------- | ----------------- | ----------------------------------------- |
+| `Project`     | provider default  | `orchex`                                  |
+| `Environment` | `var.environment` | `production`                              |
+| `Service`     | per module        | `builder-api`, `shared`                   |
+| `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `rds` |
+| `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`   |
+
+App-specific resources (ECR, ECS builder service) use `Service = builder-api`. Shared infrastructure (ALB, ECS cluster, RDS) uses `Service = shared`.
+
 ## Infrastructure architecture
 
-Root `main.tf` composes four modules. Traffic flows from the ALB to Fargate tasks running in the default VPC.
+Root `main.tf` composes five modules. Traffic flows from the ALB to Fargate tasks in the default VPC. ECS tasks reach RDS over the VPC using a shared client security group.
 
 ```text
 Internet
@@ -78,19 +99,31 @@ Internet
 │  ECS service (modules/ecs_service)  │
 │  • Fargate task(s) in default VPC   │
 │  • container :8080                  │
-│  • SG: only ALB SG may reach :8080  │
+│  • service SG: ALB may reach :8080  │
+│  • data_plane_client SG on task ENI │
 │  • registers task IPs with ALB TG   │
-└──────────────┬──────────────────────┘
-               │ runs on
-               ▼
-┌─────────────────────────────────────┐
-│  ECS cluster (modules/ecs)          │
-│  • Fargate-only capacity provider   │
-│  • shared by services in this stack │
-└─────────────────────────────────────┘
+└──────┬──────────────────┬───────────┘
+       │                  │
+       │ runs on          │ TCP :5432 (SG-to-SG)
+       ▼                  ▼
+┌──────────────────┐  ┌─────────────────────────────┐
+│  ECS cluster     │  │  RDS (modules/rds)          │
+│  (modules/ecs)   │  │  • PostgreSQL 17          │
+│  • Fargate       │  │  • db.t4g.medium (2C/4GiB)  │
+│  • data_plane_   │  │  • 20 GiB gp3 storage       │
+│    client SG     │  │  • not publicly accessible  │
+└──────────────────┘  │  • ingress: data_plane_     │
+                      │    client SG only           │
+                      └─────────────────────────────┘
 
 Image source: ECR (modules/ecr) → orchex-builder-api:latest
 ```
+
+### `modules/ecr`
+
+- Wraps [terraform-aws-modules/ecr/aws](https://registry.terraform.io/modules/terraform-aws-modules/ecr/aws).
+- Private repository for the builder API image (`orchex-builder-api`).
+- Tagged with `Service = builder-api` (via `service` variable) and `Component = ecr`.
 
 ### `modules/alb`
 
@@ -105,6 +138,7 @@ Image source: ECR (modules/ecr) → orchex-builder-api:latest
 
 - Wraps [terraform-aws-modules/ecs/aws//modules/cluster](https://registry.terraform.io/modules/terraform-aws-modules/ecs/aws).
 - Creates a shared **Fargate** cluster (`orchex-cluster`).
+- Creates a shared **`data_plane_client`** security group (`orchex-cluster-data-plane-client`). Every ECS service attaches this SG to its task ENI so RDS can allow Postgres access by security group identity.
 - Container Insights is disabled for early-stage cost; enable later if needed.
 
 ### `modules/ecs_service`
@@ -113,20 +147,53 @@ Image source: ECR (modules/ecr) → orchex-builder-api:latest
 - Runs the builder API as a Fargate service (`orchex-builder-api`) on the shared cluster.
 - Pulls the image from **ECR** (`orchex-builder-api:latest`).
 - **Load balancer**: attaches the service to the ALB target group; ECS keeps registrations in sync as tasks start/stop.
-- **Networking**: tasks get a public IP in default VPC subnets; ingress on the container port is restricted to the **ALB security group** (not open to the internet).
+- **Networking**: tasks get a public IP in default VPC subnets. Each task ENI has two security groups:
+  - **Service SG** — ingress on `:8080` only from the **ALB security group**
+  - **`data_plane_client` SG** — required client identity for RDS access (`data_plane_client_security_group_id` from `module.ecs`).
+- Tagged with `Service = builder-api` (via `service` variable) and `Component = ecs-service`.
 - Container runs with a read-only root filesystem (distroless image).
+
+### `modules/rds`
+
+- Wraps [terraform-aws-modules/rds/aws](https://registry.terraform.io/modules/terraform-aws-modules/rds/aws) v7.2.1.
+- **PostgreSQL 17** on `db.t4g.medium` (2 vCPU, 4 GiB RAM).
+- **20 GiB** `gp3` storage (RDS minimum for gp3 Postgres).
+- **Single-AZ**, no automated backups (`backup_retention_period = 0`).
+- **`publicly_accessible = false`** — no public IP; not reachable from the internet.
+- Master password managed by AWS (**Secrets Manager** via `manage_master_user_password`).
+- Default database / user: `orchex` / `orchex`.
+- **DB subnet group** and **RDS security group** created as standalone resources; the RDS module uses `create_db_subnet_group = false` and `vpc_security_group_ids` pointing at the module SG.
+- **RDS security group** allows inbound PostgreSQL (`5432`) only from the shared **`data_plane_client`** security group.
+- **Outputs** expose connection metadata only (endpoint, address, port, engine, etc.). Username and password are **not** exported — credentials live in **Secrets Manager** (`manage_master_user_password`).
 
 Wiring in root `main.tf`:
 
 ```hcl
+module "ecr_builder_api" {
+  source          = "./modules/ecr"
+  repository_name = "orchex-builder-api"
+  service         = "builder-api"
+}
+
 module "ecs_builder_api" {
   # ...
-  target_group_arn      = module.alb.target_groups["builder"].arn
-  alb_security_group_id = module.alb.security_group_id
+  service                             = "builder-api"
+  target_group_arn                    = module.alb.target_groups["builder"].arn
+  alb_security_group_id               = module.alb.security_group_id
+  data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
+}
+
+module "rds" {
+  source = "./modules/rds"
+
+  name                                = "orchex"
+  data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
 }
 ```
 
-After `terraform apply`, the ALB DNS name is available via `terraform output -json alb`.
+New ECS services that need database access must pass both `service` and `data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id` into `modules/ecs_service`.
+
+After `terraform apply`, the ALB DNS name is available via `terraform output -json alb`. RDS connection details are under `terraform output -json rds`.
 
 ## 1. Apply infrastructure
 
@@ -145,14 +212,61 @@ Inspect outputs:
 terraform output
 terraform output -json ecr_builder_api
 terraform output -json alb | jq -r '.dns_name'
+terraform output -json rds | jq
 ```
 
-| Output            | Meaning                                                 |
-| ----------------- | ------------------------------------------------------- |
-| `ecr_builder_api` | ECR repository URL, name, ARN                         |
-| `alb`             | ALB DNS name, target groups, security groups            |
-| `ecs`             | Shared Fargate cluster ARN / name                       |
-| `ecs_builder_api` | Builder service task definition, security group, etc. |
+| Output            | Meaning                                                         |
+| ----------------- | --------------------------------------------------------------- |
+| `ecr_builder_api` | ECR repository URL, name, ARN                                   |
+| `alb`             | ALB DNS name, target groups, security groups                    |
+| `ecs`             | Shared Fargate cluster ARN / name, `data_plane_client` SG       |
+| `ecs_builder_api` | Builder service task definition, security group, etc.           |
+| `rds`             | RDS connection metadata only (see fields below; no credentials) |
+
+**`rds` output fields** (non-sensitive):
+
+| Field                               | Meaning                             |
+| ----------------------------------- | ----------------------------------- |
+| `db_instance_endpoint`              | Host:port connection string         |
+| `db_instance_address`               | Hostname                            |
+| `db_instance_port`                  | Port (default `5432`)               |
+| `db_instance_name`                  | Database name (`orchex`)            |
+| `db_instance_identifier`            | RDS instance id (`orchex-postgres`) |
+| `db_instance_arn`                   | Instance ARN                        |
+| `db_instance_status`                | e.g. `available`                    |
+| `db_instance_engine`                | `postgres`                          |
+| `db_instance_engine_version_actual` | Running Postgres version            |
+| `db_subnet_group_id`                | DB subnet group name                |
+| `security_group_id`                 | RDS security group id               |
+
+Module-level `modules/rds` outputs match the above plus `db_subnet_group_arn` and `security_group_arn`. Username, password, and Secrets Manager ARNs are intentionally omitted.
+
+### RDS connection (after apply)
+
+- **Host**: `terraform output -json rds | jq -r '.db_instance_address'`
+- **Port**: `terraform output -json rds | jq -r '.db_instance_port'`
+- **Database**: `terraform output -json rds | jq -r '.db_instance_name'`
+- **Username / password**: not in Terraform outputs. RDS stores the master password in **Secrets Manager**. Retrieve via the AWS console (RDS → `orchex-postgres` → Configuration) or CLI:
+
+```bash
+# List the secret attached to the instance, then fetch the password JSON
+aws rds describe-db-instances \
+  --db-instance-identifier orchex-postgres \
+  --query 'DBInstances[0].MasterUserSecret.SecretArn' \
+  --output text \
+  --region ap-south-1 \
+  --profile orchex
+
+# Then (replace SECRET_ARN):
+aws secretsmanager get-secret-value \
+  --secret-id SECRET_ARN \
+  --query SecretString \
+  --output text \
+  --region ap-south-1 \
+  --profile orchex | jq -r '.password'
+```
+
+Only ECS tasks with the `data_plane_client` security group attached can reach the database. The instance is not publicly accessible.
 
 ## 2. Build and push the builder API image
 

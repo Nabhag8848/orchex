@@ -39,6 +39,8 @@ module "this" {
   })
 
   tags = {
-    Service = var.repository_name
+    Service   = var.service
+    Component = "ecr"
+    Name      = var.repository_name
   }
 }

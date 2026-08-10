@@ -26,6 +26,8 @@ module "this" {
   assign_public_ip = true
   subnet_ids       = data.aws_subnets.default.ids
 
+  security_group_ids = [var.data_plane_client_security_group_id]
+
   container_definitions = {
     (var.container_name) = {
       essential = true
@@ -66,6 +68,8 @@ module "this" {
   }
 
   tags = {
-    Service = var.name
+    Service   = var.service
+    Component = "ecs-service"
+    Name      = var.name
   }
 }
