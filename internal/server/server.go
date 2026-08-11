@@ -6,12 +6,18 @@ import (
 	"github.com/nabhag8848/orchex/internal/handler"
 )
 
-func NewServer() *echo.Echo {
+type Deps struct {
+	Workflows *handler.WorkflowHandler
+}
+
+func NewServer(deps Deps) *echo.Echo {
 	e := echo.New()
 	e.Use(middleware.RequestID())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
-	
+
 	e.GET("/health/builder", handler.Health)
+	e.GET("/v1/workflows/:id", deps.Workflows.Get)
+
 	return e
 }

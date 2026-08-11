@@ -56,3 +56,6 @@ Thumbs.db
 *.log
 logs
 docker-compose.override.yml
+docker-compose.yml
+Dockerfile.local
+Dockerfile.migrate
