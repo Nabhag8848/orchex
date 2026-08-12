@@ -1,13 +1,23 @@
-# One-shot goose migration image (local compose + prod ECS run-task).
-# Pin linux/amd64 so images built on Apple Silicon still run on Fargate.
-FROM --platform=linux/amd64 golang:1.26-alpine
-RUN go install github.com/pressly/goose/v3/cmd/goose@v3.27.3
+# --- build ---
+# Pin linux/amd64 so images built on Apple Silicon still run on Fargate (default X86_64).
+FROM --platform=linux/amd64 golang:1.26-alpine AS build
+# Lite goose: postgres driver only (exclude unused DB backends).
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go install -tags='no_clickhouse no_libsql no_mssql no_mysql no_sqlite3 no_vertica no_ydb' \
+  github.com/pressly/goose/v3/cmd/goose@v3.27.3
+
+# --- run ---
+FROM --platform=linux/amd64 gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build --chown=nonroot:nonroot /go/bin/goose /goose
+COPY --chown=nonroot:nonroot db/migrations/ /migrations/
 
 WORKDIR /migrations
-COPY db/migrations/ /migrations/
 
 ENV GOOSE_DRIVER=postgres
 ENV GOOSE_MIGRATION_DIR=/migrations
 
-ENTRYPOINT ["goose"]
+USER nonroot:nonroot
+
+ENTRYPOINT ["/goose"]
 CMD ["up"]
