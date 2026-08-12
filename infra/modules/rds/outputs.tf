@@ -62,3 +62,9 @@ output "security_group_arn" {
   description = "RDS security group ARN"
   value       = aws_security_group.rds.arn
 }
+
+output "db_instance_master_user_secret_arn" {
+  description = "ARN of the RDS-managed master user secret"
+  value       = module.this.db_instance_master_user_secret_arn
+  sensitive   = true
+}

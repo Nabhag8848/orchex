@@ -1,6 +1,6 @@
 # Orchex infrastructure
 
-Terraform for AWS resources. Provisions **ECR**, an **Application Load Balancer (ALB)**, a shared **ECS Fargate cluster**, an **ECS service** for the workflow builder API (`orchex-builder-api`), and **RDS PostgreSQL** (`orchex-postgres`).
+Terraform for AWS resources. Provisions **ECR**, an **Application Load Balancer (ALB)**, a shared **ECS Fargate cluster**, an **ECS service** for the workflow builder API (`orchex-builder-api`), a **one-shot migrate task definition** (`orchex-db-migrate`), and **RDS PostgreSQL** (`orchex-postgres`).
 
 Terraform creates and wires the infrastructure. Building and pushing the container image is done with Docker + the AWS CLI.
 
@@ -11,13 +11,15 @@ infra/
   terraform.tf      # required Terraform / provider versions
   providers.tf      # AWS provider (region, profile, default tags)
   variables.tf      # shared variables (region, environment)
-  main.tf           # root modules (ECR, ALB, ECS, ECS service, RDS)
+  main.tf           # root modules (ECR, ALB, ECS, ECS service, ECS migrate task, RDS, secrets)
   outputs.tf        # root outputs
   modules/
     ecr/            # ECR repository for container images
     alb/            # internet-facing ALB + target group
     ecs/            # shared Fargate cluster + data_plane_client SG
     ecs_service/    # Fargate service (task definition, SG, ALB attachment)
+    ecs_run_task/   # one-shot Fargate task definition (migrations via run-task)
+    secrets_manager/# Secrets Manager secret + version
     rds/            # PostgreSQL RDS (subnet group, SG, instance)
 ```
 
@@ -69,13 +71,13 @@ terraform apply -var='environment=staging'
 
 All resources receive provider default tags plus module-level tags:
 
-| Tag           | Source            | Example values                            |
-| ------------- | ----------------- | ----------------------------------------- |
-| `Project`     | provider default  | `orchex`                                  |
-| `Environment` | `var.environment` | `production`                              |
-| `Service`     | per module        | `builder-api`, `shared`                   |
-| `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `rds` |
-| `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`   |
+| Tag           | Source            | Example values                                                               |
+| ------------- | ----------------- | ---------------------------------------------------------------------------- |
+| `Project`     | provider default  | `orchex`                                                                     |
+| `Environment` | `var.environment` | `production`                                                                 |
+| `Service`     | per module        | `builder-api`, `shared`                                                      |
+| `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `ecs-run-task`, `rds`, `secrets-manager` |
+| `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`                                      |
 
 App-specific resources (ECR, ECS builder service) use `Service = builder-api`. Shared infrastructure (ALB, ECS cluster, RDS) uses `Service = shared`.
 
@@ -116,7 +118,7 @@ Internet
                       │    client SG only           │
                       └─────────────────────────────┘
 
-Image source: ECR (modules/ecr) → orchex-builder-api:latest
+Image sources: ECR → `orchex-builder-api:latest` (API), `orchex-db-migrate:latest` (goose migrations via `aws ecs run-task`)
 ```
 
 ### `modules/ecr`
@@ -215,13 +217,16 @@ terraform output -json alb | jq -r '.dns_name'
 terraform output -json rds | jq
 ```
 
-| Output            | Meaning                                                         |
-| ----------------- | --------------------------------------------------------------- |
-| `ecr_builder_api` | ECR repository URL, name, ARN                                   |
-| `alb`             | ALB DNS name, target groups, security groups                    |
-| `ecs`             | Shared Fargate cluster ARN / name, `data_plane_client` SG       |
-| `ecs_builder_api` | Builder service task definition, security group, etc.           |
-| `rds`             | RDS connection metadata only (see fields below; no credentials) |
+| Output                | Meaning                                                         |
+| --------------------- | --------------------------------------------------------------- |
+| `ecr_builder_api`     | ECR repository URL, name, ARN                                   |
+| `ecr_db_migrate`      | Shared goose migration image repository                         |
+| `alb`                 | ALB DNS name, target groups, security groups                    |
+| `ecs`                 | Shared Fargate cluster ARN / name, `data_plane_client` SG       |
+| `ecs_db_migrate`      | Migrate task definition + `run_task_network_configuration`      |
+| `ecs_builder_api`     | Builder service task definition, security group, etc.           |
+| `database_url_secret` | Shared `orchex/DATABASE_URL` secret ARN / name                  |
+| `rds`                 | RDS connection metadata only (see fields below; no credentials) |
 
 **`rds` output fields** (non-sensitive):
 
@@ -268,7 +273,61 @@ aws secretsmanager get-secret-value \
 
 Only ECS tasks with the `data_plane_client` security group attached can reach the database. The instance is not publicly accessible.
 
-## 2. Build and push the builder API image
+## 2. Build and push the migrate image, then run migrations
+
+After RDS and the shared `orchex/DATABASE_URL` secret exist, apply schema changes with a **one-shot Fargate task** (not a long-running service).
+
+Use the same region as `var.aws_region`. In **zsh**, always write `${REPO_URL}:latest` (not `$REPO_URL:latest`).
+
+```bash
+cd infra
+
+MIGRATE_REPO=$(terraform output -json ecr_db_migrate | jq -r '.repository_url')
+REGION=ap-south-1   # must match var.aws_region
+CLUSTER=$(terraform output -json ecs | jq -r '.name')
+
+aws ecr get-login-password --region "$REGION" --profile orchex \
+  | docker login --username AWS --password-stdin "$(echo "$MIGRATE_REPO" | cut -d/ -f1)"
+
+cd ..
+docker build -f Dockerfile.migrate -t "${MIGRATE_REPO}:latest" .
+docker push "${MIGRATE_REPO}:latest"
+```
+
+Run goose against RDS (reads `GOOSE_DBSTRING` from the shared `orchex/DATABASE_URL` secret):
+
+```bash
+cd infra
+
+TASK_DEF=$(terraform output -json ecs_db_migrate | jq -r '.task_definition_family')
+NET=$(terraform output -json ecs_db_migrate | jq -r '.run_task_network_configuration')
+SUBNETS=$(echo "$NET" | jq -r '.subnets')
+SGS=$(echo "$NET" | jq -r '.security_groups')
+
+TASK_ARN=$(aws ecs run-task \
+  --cluster "$CLUSTER" \
+  --task-definition "$TASK_DEF" \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SGS],assignPublicIp=ENABLED}" \
+  --region ap-south-1 \
+  --profile orchex \
+  --query 'tasks[0].taskArn' \
+  --output text)
+
+aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region ap-south-1 --profile orchex
+
+aws ecs describe-tasks \
+  --cluster "$CLUSTER" \
+  --tasks "$TASK_ARN" \
+  --region ap-south-1 \
+  --profile orchex \
+  --query 'tasks[0].containers[0].{exitCode:exitCode,reason:reason}' \
+  --output json
+```
+
+Expect `"exitCode": 0`. Re-run migrations after pushing a new migrate image whenever `db/migrations/` changes.
+
+## 3. Build and push the builder API image
 
 Use the same region as `var.aws_region`. In **zsh**, always write `${REPO_URL}:tag` (not `$REPO_URL:tag`).
 

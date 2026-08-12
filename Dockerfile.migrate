@@ -1,6 +1,6 @@
-# One-shot migration image for local docker compose.
-
-FROM golang:1.26-alpine
+# One-shot goose migration image (local compose + prod ECS run-task).
+# Pin linux/amd64 so images built on Apple Silicon still run on Fargate.
+FROM --platform=linux/amd64 golang:1.26-alpine
 RUN go install github.com/pressly/goose/v3/cmd/goose@v3.27.3
 
 WORKDIR /migrations

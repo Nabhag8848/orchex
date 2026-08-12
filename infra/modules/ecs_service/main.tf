@@ -9,6 +9,19 @@ data "aws_subnets" "default" {
   }
 }
 
+locals {
+  container_environment = [
+    { name = "HTTP_ADDR", value = ":8080" },
+  ]
+
+  container_secrets = var.database_url_secret_arn != null ? [
+    {
+      name      = "DATABASE_URL"
+      valueFrom = var.database_url_secret_arn
+    },
+  ] : []
+}
+
 module "this" {
   source  = "terraform-aws-modules/ecs/aws//modules/service"
   version = "7.5.0"
@@ -28,6 +41,8 @@ module "this" {
 
   security_group_ids = [var.data_plane_client_security_group_id]
 
+  task_exec_secret_arns = var.database_url_secret_arn != null ? [var.database_url_secret_arn] : []
+
   container_definitions = {
     (var.container_name) = {
       essential = true
@@ -37,6 +52,9 @@ module "this" {
         containerPort = var.container_port
         protocol      = "tcp"
       }]
+
+      environment = local.container_environment
+      secrets     = local.container_secrets
 
       # Distroless image; keep filesystem read-only.
       readonlyRootFilesystem = true

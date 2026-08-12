@@ -1,31 +1,25 @@
 variable "name" {
   type        = string
-  description = "Name of the ECS service"
+  description = "Name prefix for the ECS task definition family"
   nullable    = false
 }
 
 variable "cluster_arn" {
   type        = string
-  description = "ARN of the ECS cluster to run this service on"
+  description = "ARN of the ECS cluster tasks run on"
   nullable    = false
 }
 
 variable "container_name" {
   type        = string
   description = "Name of the container inside the task"
-  nullable    = false
+  default     = "migrate"
 }
 
 variable "image" {
   type        = string
   description = "Container image URI (ECR repository URL with tag)"
   nullable    = false
-}
-
-variable "container_port" {
-  type        = number
-  description = "Port the container listens on"
-  default     = 8080
 }
 
 variable "cpu" {
@@ -40,21 +34,9 @@ variable "memory" {
   default     = 512
 }
 
-variable "desired_count" {
-  type        = number
-  description = "Number of tasks to keep running"
-  default     = 1
-}
-
-variable "target_group_arn" {
+variable "database_url_secret_arn" {
   type        = string
-  description = "ALB target group ARN; ECS registers task IPs automatically"
-  nullable    = false
-}
-
-variable "alb_security_group_id" {
-  type        = string
-  description = "ALB security group allowed to reach the container port"
+  description = "Secrets Manager ARN for the shared DATABASE_URL (injected as GOOSE_DBSTRING)"
   nullable    = false
 }
 
@@ -67,12 +49,5 @@ variable "data_plane_client_security_group_id" {
 variable "service" {
   type        = string
   description = "Logical service name for tagging"
-  nullable    = false
-}
-
-variable "database_url_secret_arn" {
-  type        = string
-  description = "Secrets Manager ARN for DATABASE_URL; injected into the container when set"
-  default     = null
-  nullable    = true
+  default     = "shared"
 }

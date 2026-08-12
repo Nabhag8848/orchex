@@ -8,6 +8,16 @@ output "ecr_builder_api" {
   }
 }
 
+output "ecr_db_migrate" {
+  description = "ECR repository for shared database migrations (goose)"
+  value = {
+    repository_arn         = module.ecr_db_migrate.repository_arn
+    repository_name        = module.ecr_db_migrate.repository_name
+    repository_registry_id = module.ecr_db_migrate.repository_registry_id
+    repository_url         = module.ecr_db_migrate.repository_url
+  }
+}
+
 output "alb" {
   description = "Application load balancer"
   value = {
@@ -52,6 +62,14 @@ output "ecs" {
   }
 }
 
+output "database_url_secret" {
+  description = "Shared DATABASE_URL secret for ECS services (ARN only; value is sensitive)"
+  value = {
+    arn  = module.database_url.arn
+    name = module.database_url.name
+  }
+}
+
 output "rds" {
   description = "PostgreSQL RDS instance (connection metadata only; credentials stay in Secrets Manager)"
   value = {
@@ -66,6 +84,19 @@ output "rds" {
     db_instance_engine_version_actual = module.rds.db_instance_engine_version_actual
     db_subnet_group_id                = module.rds.db_subnet_group_id
     security_group_id                 = module.rds.security_group_id
+  }
+}
+
+output "ecs_db_migrate" {
+  description = "One-shot ECS task definition for goose migrations (aws ecs run-task)"
+  value = {
+    task_definition_arn            = module.ecs_db_migrate.task_definition_arn
+    task_definition_family         = module.ecs_db_migrate.task_definition_family
+    task_definition_revision       = module.ecs_db_migrate.task_definition_revision
+    task_exec_iam_role_arn         = module.ecs_db_migrate.task_exec_iam_role_arn
+    security_group_id              = module.ecs_db_migrate.security_group_id
+    subnet_ids                     = module.ecs_db_migrate.subnet_ids
+    run_task_network_configuration = module.ecs_db_migrate.run_task_network_configuration
   }
 }
 
