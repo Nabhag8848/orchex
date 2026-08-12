@@ -61,7 +61,6 @@ curl http://localhost:8080/v1/workflows/<uuid>
 With Compose Postgres already up:
 
 ```bash
-export $(grep -v '^#' .env | xargs)   # or source vars another way
 make migrate-status
 ```
 

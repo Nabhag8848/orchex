@@ -1,5 +1,12 @@
 .PHONY: sqlc migrate-up migrate-down migrate-status run compose-up compose-down compose-logs compose-ps
 
+# Host-side targets (migrate-*, run) read DATABASE_URL from .env.
+# Compose loads .env via env_file; Make does not unless we export it here.
+ifneq (,$(wildcard .env))
+include .env
+export DATABASE_URL HTTP_ADDR HTTP_PORT POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB POSTGRES_PORT
+endif
+
 sqlc:
 	sqlc generate
 
