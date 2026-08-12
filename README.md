@@ -72,16 +72,16 @@ make sqlc
 
 ## Local vs production
 
-|                | Local                                          | Production                                                                    |
-| -------------- | ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Compute**    | Docker Compose (`Dockerfile.local`)            | ECS Fargate (`Dockerfile` — `linux/amd64`, distroless)                        |
-| **Database**   | `postgres:17-alpine` in Compose                | Amazon RDS for PostgreSQL 17                                                  |
-| **Config**     | `.env` from `.env.example`                     | Task definition / secrets (see `.env.production.example`)                     |
-| **Migrations** | goose one-shot `migrate` service on compose up | goose against RDS (run as a release step / job; not baked into the API image) |
-| **TLS to DB**  | `sslmode=disable`                              | `sslmode=require`                                                             |
-| **Networking** | localhost ports `5432` / `8080`                | ALB → ECS; ECS talks to RDS in the VPC                                        |
+|                | Local                                          | Production                                                                                                   |
+| -------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Compute**    | Docker Compose (`Dockerfile.local`)            | ECS Fargate (`Dockerfile` — `linux/amd64`, distroless)                                                       |
+| **Database**   | `postgres:17-alpine` in Compose                | Amazon RDS for PostgreSQL 17                                                                                 |
+| **Config**     | `.env` from `.env.example`                     | Task definition / secrets (see `.env.production.example`)                                                    |
+| **Migrations** | goose one-shot `migrate` service on compose up | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations)) |
+| **TLS to DB**  | `sslmode=disable`                              | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                         |
+| **Networking** | localhost ports `5432` / `8080`                | ALB → ECS; ECS talks to RDS in the VPC                                                                       |
 
-Infra (ECR, ALB, ECS, RDS) is managed with Terraform under [infra/](./infra/).
+Infra (ECR, ALB, ECS, RDS, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 
 ## Design docs
 
