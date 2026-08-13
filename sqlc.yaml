@@ -36,3 +36,21 @@ sql:
               import: "time"
               type: "Time"
               pointer: true
+          - db_type: "pg_catalog.float8"
+            go_type:
+              type: "float64"
+          - db_type: "pg_catalog.float8"
+            nullable: true
+            go_type:
+              type: "float64"
+              pointer: true
+          - db_type: "jsonb"
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: "encoding/json"
+              type: "RawMessage"
+              pointer: true

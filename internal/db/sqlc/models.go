@@ -6,11 +6,99 @@ package sqlcdb
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+type EdgeLabel string
+
+const (
+	EdgeLabelDefault EdgeLabel = "default"
+	EdgeLabelTrue    EdgeLabel = "true"
+	EdgeLabelFalse   EdgeLabel = "false"
+)
+
+func (e *EdgeLabel) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = EdgeLabel(s)
+	case string:
+		*e = EdgeLabel(s)
+	default:
+		return fmt.Errorf("unsupported scan type for EdgeLabel: %T", src)
+	}
+	return nil
+}
+
+type NullEdgeLabel struct {
+	EdgeLabel EdgeLabel `json:"edge_label"`
+	Valid     bool      `json:"valid"` // Valid is true if EdgeLabel is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullEdgeLabel) Scan(value interface{}) error {
+	if value == nil {
+		ns.EdgeLabel, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.EdgeLabel.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullEdgeLabel) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.EdgeLabel), nil
+}
+
+type NodeCategory string
+
+const (
+	NodeCategoryTrigger  NodeCategory = "trigger"
+	NodeCategoryLogic    NodeCategory = "logic"
+	NodeCategoryAction   NodeCategory = "action"
+	NodeCategoryTerminal NodeCategory = "terminal"
+)
+
+func (e *NodeCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NodeCategory(s)
+	case string:
+		*e = NodeCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NodeCategory: %T", src)
+	}
+	return nil
+}
+
+type NullNodeCategory struct {
+	NodeCategory NodeCategory `json:"node_category"`
+	Valid        bool         `json:"valid"` // Valid is true if NodeCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNodeCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.NodeCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NodeCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNodeCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NodeCategory), nil
+}
 
 type WorkflowStatus string
 
@@ -55,12 +143,62 @@ func (ns NullWorkflowStatus) Value() (driver.Value, error) {
 	return string(ns.WorkflowStatus), nil
 }
 
+type Node struct {
+	ID                uuid.UUID       `json:"id"`
+	WorkflowVersionID uuid.UUID       `json:"workflow_version_id"`
+	NodeTypeID        uuid.UUID       `json:"node_type_id"`
+	Name              string          `json:"name"`
+	Config            json.RawMessage `json:"config"`
+	PositionX         *float64        `json:"position_x"`
+	PositionY         *float64        `json:"position_y"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+}
+
+type NodeType struct {
+	ID           uuid.UUID       `json:"id"`
+	Type         string          `json:"type"`
+	Category     NodeCategory    `json:"category"`
+	DisplayName  string          `json:"display_name"`
+	MinInDegree  int32           `json:"min_in_degree"`
+	MaxInDegree  int32           `json:"max_in_degree"`
+	MinOutDegree int32           `json:"min_out_degree"`
+	MaxOutDegree int32           `json:"max_out_degree"`
+	ConfigSchema json.RawMessage `json:"config_schema"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	OutputSchema json.RawMessage `json:"output_schema"`
+	ErrorSchema  json.RawMessage `json:"error_schema"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
 type Workflow struct {
-	ID              uuid.UUID      `json:"id"`
-	Name            string         `json:"name"`
-	Description     *string        `json:"description"`
-	Status          WorkflowStatus `json:"status"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	LastPublishedAt *time.Time     `json:"last_published_at"`
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+}
+
+type WorkflowEdge struct {
+	ID                uuid.UUID `json:"id"`
+	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
+	FromNodeID        uuid.UUID `json:"from_node_id"`
+	ToNodeID          uuid.UUID `json:"to_node_id"`
+	Label             EdgeLabel `json:"label"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type WorkflowVersion struct {
+	ID            uuid.UUID  `json:"id"`
+	WorkflowID    uuid.UUID  `json:"workflow_id"`
+	Version       int32      `json:"version"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastUpdatedAt time.Time  `json:"last_updated_at"`
+	PublishedAt   *time.Time `json:"published_at"`
 }

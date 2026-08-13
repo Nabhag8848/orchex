@@ -7,6 +7,7 @@ package sqlcdb
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -17,6 +18,8 @@ SELECT
     name,
     description,
     status,
+    latest_published_version_id,
+    latest_version_id,
     created_at,
     updated_at,
     last_published_at
@@ -25,14 +28,28 @@ WHERE id = $1
   AND status != 'archived'
 `
 
-func (q *Queries) GetWorkflow(ctx context.Context, id uuid.UUID) (Workflow, error) {
+type GetWorkflowRow struct {
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+}
+
+func (q *Queries) GetWorkflow(ctx context.Context, id uuid.UUID) (GetWorkflowRow, error) {
 	row := q.db.QueryRow(ctx, getWorkflow, id)
-	var i Workflow
+	var i GetWorkflowRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
 		&i.Description,
 		&i.Status,
+		&i.LatestPublishedVersionID,
+		&i.LatestVersionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastPublishedAt,

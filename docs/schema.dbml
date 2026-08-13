@@ -8,6 +8,12 @@ Project Orchex {
   database_type: 'PostgreSQL'
   Note: '''
     OLTP store for workflow definitions and active run state.
+
+    Timestamp convention: created_at is DEFAULT now() on insert.
+    updated_at (and last_updated_at on workflow_versions) is maintained by a
+    BEFORE UPDATE FOR EACH ROW trigger (touch_updated_at / touch_last_updated_at).
+    Application UPDATEs must not set those columns; the trigger overwrites them.
+    Triggers are not representable in DBML — see db/migrations.
   '''
 }
 
@@ -36,7 +42,7 @@ Table node_types {
   output_schema jsonb [not null, default: '{}', note: 'JSON Schema for runtime output to downstream']
   error_schema jsonb [not null, default: '{}', note: 'JSON Schema for node executor error envelope (type, code, message, retryable, details)']
   created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_updated_at']
 
   Note: '''
     Seeded reference catalog. Degree bounds enforce README graph rules at publish time.
@@ -72,7 +78,7 @@ Table workflows {
   latest_published_version_id uuid [ref: > workflow_versions.id, note: 'NULL until first publish; then always set while status is published/archived']
   latest_version_id uuid [not null, ref: > workflow_versions.id, note: 'Always set. Create = workflow + empty v1 in one transaction']
   created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_updated_at']
   last_published_at timestamptz [note: 'NULL until first publish']
 
   Note: '''
@@ -89,7 +95,7 @@ Table workflow_versions {
   workflow_id uuid [not null, ref: > workflows.id]
   version int [not null, default: 1, note: 'Monotonic per workflow; app-assigned on create/fork (not a global serial)']
   created_at timestamptz [not null, default: `now()`]
-  last_updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  last_updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_last_updated_at']
   published_at timestamptz [note: 'NULL = draft; set once on publish']
 
   indexes {
@@ -120,7 +126,7 @@ Table nodes {
   position_x float [note: 'UI layout only; NULL until canvas places the node']
   position_y float [note: 'UI layout only; NULL until canvas places the node']
   created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_updated_at']
 
   indexes {
     (workflow_version_id, id) [pk]
@@ -148,7 +154,7 @@ Table workflow_edges {
   to_node_id uuid [not null]
   label edge_label [not null, default: 'default']
   created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_updated_at']
 
   indexes {
     (workflow_version_id, id) [pk]
@@ -200,7 +206,7 @@ Table workflow_runs {
   completed_at timestamptz [note: 'NULL unless status=completed']
   failed_at timestamptz [note: 'NULL unless status=failed']
   created_at timestamptz [not null, default: `now()`]
-  updated_at timestamptz [not null, default: `now()`, note: 'Auto-updated on every row update by DB/app layer']
+  updated_at timestamptz [not null, default: `now()`, note: 'BEFORE UPDATE trigger touch_updated_at']
 
   indexes {
     (id, workflow_version_id) [unique, name: 'uq_workflow_runs_id_version', note: 'Target for composite FKs that must match a run with its pinned version (e.g. outbox rows)']

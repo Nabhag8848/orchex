@@ -1017,6 +1017,8 @@ erDiagram
 
 The diagram is a readable overview. In particular, version and node-name uniqueness are composite—`(workflow_id, version)` and `(workflow_version_id, name)`—rather than single-column constraints. Composite keys, partial indexes, timestamps, nullability, and implementation notes remain fully specified in [schema.dbml](./schema.dbml).
 
+`created_at` is set with `DEFAULT now()` on insert. `updated_at` is maintained by a PostgreSQL `BEFORE UPDATE` trigger (`touch_updated_at`) on `node_types`, `workflows`, `nodes`, and `workflow_edges`. `workflow_versions` uses the same pattern on `last_updated_at` (`touch_last_updated_at`). Application `UPDATE` statements should not assign those columns; the trigger overwrites them on every row update. DBML cannot represent triggers, so the functions live in the goose migration.
+
 ### `node_types`
 
 **Interviewer:** Why have a node-type table instead of only an enum?
@@ -1055,7 +1057,7 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 - UUID identity and parent workflow;
 - integer `version`, monotonic within that workflow;
 - `published_at`, where `null` means draft;
-- `created_at` and `last_updated_at` (this table uses `last_updated_at`, not `updated_at`).
+- `created_at` and `last_updated_at` (this table uses `last_updated_at`, not `updated_at`; `last_updated_at` is trigger-maintained).
 
 `(workflow_id, version)` is unique. A partial unique index on `workflow_id WHERE published_at IS NULL` ensures at most one draft per workflow. Published rows are treated as immutable by the application.
 
