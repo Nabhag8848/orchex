@@ -1,6 +1,6 @@
 # Orchex
 
-**A durable workflow execution engine**
+**A durable workflow orchestration + execution engine — we own orchestration**
 
 Build a graph. Publish an immutable version. Run it reliably. Resume exactly where it failed.
 
