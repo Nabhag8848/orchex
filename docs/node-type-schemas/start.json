@@ -3,6 +3,10 @@
   "type": "start",
   "category": "trigger",
   "display_name": "Start",
+  "min_in_degree": 0,
+  "max_in_degree": 0,
+  "min_out_degree": 1,
+  "max_out_degree": 1,
   "config_schema": {
     "type": "object",
     "properties": {

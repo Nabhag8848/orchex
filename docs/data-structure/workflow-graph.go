@@ -9,7 +9,6 @@ const (
 	NodeConditional NodeType = "conditional"
 	NodeFunction    NodeType = "function"
 	NodeAPI         NodeType = "api"
-	NodeIntegration NodeType = "integration"
 	NodeResponse    NodeType = "response"
 )
 
@@ -79,7 +78,7 @@ func (w *WorkflowGraph) validateNodeDegrees(id string) error {
 		if in != 1 || out != 2 {
 			return fmt.Errorf("conditional node %q: want in-degree=1 out-degree=2, got in=%d out=%d", id, in, out)
 		}
-	case NodeFunction, NodeAPI, NodeIntegration:
+	case NodeFunction, NodeAPI:
 		if in != 1 || out != 1 {
 			return fmt.Errorf("%s node %q: want in-degree=1 out-degree=1, got in=%d out=%d", n.Type, id, in, out)
 		}

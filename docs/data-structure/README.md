@@ -131,12 +131,12 @@ Workflows map graph concepts to execution:
 
 Orchex in-degree / out-degree rules per node type:
 
-| Node Type                    | In-degree | Out-degree |
-| ---------------------------- | --------- | ---------- |
-| Start                        | 0         | 1          |
-| Response                     | 1         | 0          |
-| Conditional                  | 1         | 2          |
-| Function / API / Integration | 1         | 1          |
+| Node Type      | In-degree | Out-degree |
+| -------------- | --------- | ---------- |
+| Start          | 0         | 1          |
+| Response       | 1         | 0          |
+| Conditional    | 1         | 2          |
+| Function / API | 1         | 1          |
 
 ---
 

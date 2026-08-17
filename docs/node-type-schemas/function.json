@@ -3,6 +3,10 @@
   "type": "function",
   "category": "logic",
   "display_name": "Function",
+  "min_in_degree": 1,
+  "max_in_degree": 1,
+  "min_out_degree": 1,
+  "max_out_degree": 1,
   "config_schema": {
     "type": "object",
     "required": ["runtime", "source"],

@@ -69,7 +69,7 @@ This document tells the story of the design as a conversation between an intervi
 
 **Interviewer:** Are we also building the integration catalog and credential system?
 
-**Candidate:** No. We assume integration infrastructure and authentication already exist, and use Composio for Integration Action nodes. Orchex decides when an action executes and how its result moves through the graph; Composio handles the provider-specific action and credentials.
+**Candidate:** Not in v1. Provider catalogs, OAuth, and credentials are out of scope. Workflows that need an HTTP call use the General API node. An Integration Action node can be added later through the schema-driven catalog without changing the identity model.
 
 ### What does a workflow look like?
 
@@ -88,22 +88,21 @@ This separation matters. If every save required a runnable graph, the builder wo
 
 **Interviewer:** Which node types are in v1, and how may they connect?
 
-**Candidate:** We support six node types:
+**Candidate:** We support five node types:
 
-| Node                   | Role                              | In  | Out |
-| ---------------------- | --------------------------------- | --- | --- |
-| **Start**              | Entry point                       | `0` | `1` |
-| **Conditional**        | Choose a `true` or `false` branch | `1` | `2` |
-| **Function**           | Run isolated JavaScript           | `1` | `1` |
-| **General API**        | Make an HTTP request              | `1` | `1` |
-| **Integration Action** | Invoke a Composio action          | `1` | `1` |
-| **Response**           | Finish the workflow               | `1` | `0` |
+| Node            | Role                              | In  | Out |
+| --------------- | --------------------------------- | --- | --- |
+| **Start**       | Entry point                       | `0` | `1` |
+| **Conditional** | Choose a `true` or `false` branch | `1` | `2` |
+| **Function**    | Run isolated JavaScript           | `1` | `1` |
+| **General API** | Make an HTTP request              | `1` | `1` |
+| **Response**    | Finish the workflow               | `1` | `0` |
 
 Normal edges use the label `default`. The two outgoing edges of a Conditional use `true` and `false`. The database enforces one edge per `(workflow version, source node, label)`, which also prevents two `true` branches from the same Conditional.
 
 Those degree rules also mean v1 has no merge points. After a Conditional branches, each path continues independently; nothing may rejoin with fan-in greater than one. That keeps scheduling and resume simple for now. Join semantics can come later with an explicit node type rather than as a silent graph exception.
 
-Agent, Router, and Scheduler nodes are intentionally deferred. The schema-driven node catalog lets us add them without changing the identity model.
+Agent, Router, Scheduler, and Integration Action nodes are intentionally deferred. The schema-driven node catalog lets us add them without changing the identity model.
 
 ### Why a DAG
 
@@ -163,7 +162,7 @@ stateDiagram-v2
 
 ### How are node failures presented?
 
-**Interviewer:** What happens when a Conditional receives bad data, a Function throws, an integration token expires, or an API times out or returns non-2xx?
+**Interviewer:** What happens when a Conditional receives bad data, a Function throws, or an API times out or returns non-2xx?
 
 **Candidate:** Every executor fails through a structured node-specific error envelope. It gives the UI a stable error class, code, user-facing message, retryability, and optional remediation details. The run stores that error together with the failing node ID so recovery is explicit rather than hidden in logs.
 
@@ -219,7 +218,7 @@ Execution checkpoints need strong correctness. Observability can be eventually c
 
 ### Extensibility
 
-**Interviewer:** Are we locking the system to these six nodes and manual triggers?
+**Interviewer:** Are we locking the system to these five nodes and manual triggers?
 
 **Candidate:** No. Node behavior is schema-driven, and the trigger enum already leaves room for webhooks and schedules. We are keeping the v1 surface small without baking those limitations into the core model.
 
@@ -256,7 +255,6 @@ flowchart LR
     Registry --> API["General API"]
     Registry --> Conditional["Conditional"]
     Registry --> Function["Function"]
-    Registry --> Integration["Integration"]
     Registry --> Response["Response"]
 
     Function --> Sandbox["Lambda / E2B-like Sandbox"]
@@ -869,20 +867,6 @@ For every node except Start input, runtime payloads use a top-level `data` field
 - A non-2xx HTTP response becomes an execution error with code `HTTP_NON_2XX` and does not hand off as success to the next node. The output schema still enumerates a broad status set for the successful response shape; the error envelope owns the failure path.
 - Error `type`: `validation | api | timeout | rate_limit | internal`.
 - Errors: `INVALID_INPUT`, `INVALID_CONFIG`, `HTTP_NON_2XX`, `TIMEOUT`, `NETWORK_ERROR`, `RATE_LIMITED`, `INTERNAL_ERROR`.
-
-### Integration Action
-
-**Interviewer:** How does a provider-specific action fit the same graph model?
-
-**Candidate:** The node delegates the action to Composio but keeps Orchex's normal input, output, timeout, and error contracts.
-
-- Provider: fixed to `composio`.
-- Config: uppercase action ID such as `GITHUB_CREATE_ISSUE`, optional templated parameters, and timeout.
-- Timeout: 30 seconds by default, up to 300 seconds.
-- Input: open object under `data`.
-- Output: `data.action` and `data.result`.
-- Error `type`: `validation | operation | auth | api | timeout | rate_limit | internal`.
-- Errors: `INVALID_INPUT`, `INVALID_CONFIG`, `AUTH_EXPIRED`, `ACTION_FAILED`, `TIMEOUT`, `NETWORK_ERROR`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
 ### Response
 
@@ -1765,12 +1749,12 @@ flowchart LR
   B --> R2[Response]
 ```
 
-| Role on the canvas               | Degrees         | Everyday reading                                    |
-| -------------------------------- | --------------- | --------------------------------------------------- |
-| **Start**                        | in `0`, out `1` | Nothing before it; exactly one first step           |
-| **API / Function / Integration** | in `1`, out `1` | One predecessor, one successor — a straight link    |
-| **Conditional**                  | in `1`, out `2` | One way in; two labeled ways out (`true` / `false`) |
-| **Response**                     | in `1`, out `0` | One way in; nothing after — the run finishes        |
+| Role on the canvas | Degrees         | Everyday reading                                    |
+| ------------------ | --------------- | --------------------------------------------------- |
+| **Start**          | in `0`, out `1` | Nothing before it; exactly one first step           |
+| **API / Function** | in `1`, out `1` | One predecessor, one successor — a straight link    |
+| **Conditional**    | in `1`, out `2` | One way in; two labeled ways out (`true` / `false`) |
+| **Response**       | in `1`, out `0` | One way in; nothing after — the run finishes        |
 
 Those rules are why v1 has **no merge**: two branches may not rejoin into one node (`in > 1`). Fan-in would need an explicit Join later; for now each branch keeps its own path.
 
@@ -2153,7 +2137,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 **Candidate:** Keeping v1 small is part of the design:
 
 - webhook and scheduler trigger APIs;
-- Agent, Router, and Scheduler nodes;
+- Agent, Router, Scheduler, and Integration Action nodes;
 - custom user-defined node types;
 - multitenancy fields and authorization rules;
 - arbitrary historical-version retrieval;
@@ -2185,7 +2169,7 @@ These are not hidden assumptions. They are the next decisions the design needs.
 - [orchex.excalidraw](./orchex.excalidraw) — authoritative architecture, API, schema, execution deep-dive, queue-product, OLTP/RDS, graph data-structure, control-plane compute (ECS on Fargate), and Function isolation board.
 - [schema.dbml](./schema.dbml) — PostgreSQL OLTP schema.
 - [bench/postgres](./bench/postgres) — Docker + pgbench harness and capacity notes behind the RDS decision.
-- [node-type-schemas](./node-type-schemas) — JSON Schema contracts for all six node types (including Function `source`).
+- [node-type-schemas](./node-type-schemas) — JSON Schema contracts for the v1 node types (including Function `source`).
 - [data-structure](./data-structure) — Go graph sketches and learning notes behind the graph data-structure deep dive.
 
 The design has one recurring principle: let drafts be easy to build, make published workflows safe to run, and never lose the exact point from which a failed run should continue.

@@ -30,7 +30,7 @@ Enum node_category {
 
 Table node_types {
   id uuid [pk, default: `gen_random_uuid()`]
-  type text [not null, unique, note: 'start | conditional | function | api | integration | response']
+  type text [not null, unique, note: 'start | conditional | function | api | response']
   category node_category [not null]
   display_name text [not null]
   min_in_degree int [not null]
@@ -56,7 +56,6 @@ Table node_types {
     | conditional  | logic     | 1  | 2   | strict            | pass-through   |
     | function     | logic     | 1  | 1   | strict            | loose object   |
     | api          | action    | 1  | 1   | strict            | output known   |
-    | integration  | action    | 1  | 1   | strict            | output loose   |
   '''
 }
 
