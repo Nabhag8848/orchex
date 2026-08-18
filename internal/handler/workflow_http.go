@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,6 +12,23 @@ import (
 type CreateWorkflowRequest struct {
 	Name        string  `json:"name" validate:"required,min=1,max=255"`
 	Description *string `json:"description" validate:"omitempty,max=2000"`
+}
+
+type UpdateWorkflowRequest struct {
+	Name        string  `json:"name" validate:"required,min=1,max=255"`
+	Description *string `json:"description" validate:"omitempty,max=2000"`
+	Nodes       []Node  `json:"nodes" validate:"dive"`
+	Edges       []Edge  `json:"edges" validate:"dive"`
+}
+
+func (r *UpdateWorkflowRequest) withEmptyGraph() UpdateWorkflowRequest {
+	if r.Nodes == nil {
+		r.Nodes = []Node{}
+	}
+	if r.Edges == nil {
+		r.Edges = []Edge{}
+	}
+	return *r
 }
 
 type Workflow struct {
@@ -32,10 +50,18 @@ type Position struct {
 
 type Node struct {
 	ID       uuid.UUID       `json:"id"`
-	NodeType string          `json:"node_type"`
-	Name     string          `json:"name"`
+	NodeType string          `json:"node_type" validate:"required"`
+	Name     string          `json:"name" validate:"required,min=1"`
 	Config   json.RawMessage `json:"config"`
 	Position *Position       `json:"position"`
+}
+
+func (n Node) coords() (x, y *float64) {
+	if n.Position == nil {
+		return nil, nil
+	}
+	px, py := n.Position.X, n.Position.Y
+	return &px, &py
 }
 
 type Edge struct {
@@ -58,40 +84,36 @@ type WorkflowDetail struct {
 	Graph VersionGraph `json:"graph"`
 }
 
-func workflowFromCreate(row sqlcdb.CreateWorkflowRow) Workflow {
-	return Workflow{
-		ID:                       row.ID,
-		Name:                     row.Name,
-		Description:              row.Description,
-		Status:                   string(row.Status),
-		LatestVersionID:          row.LatestVersionID,
-		LatestPublishedVersionID: row.LatestPublishedVersionID,
-		CreatedAt:                row.CreatedAt,
-		UpdatedAt:                row.UpdatedAt,
-		LastPublishedAt:          row.LastPublishedAt,
+func publishedRequested(version string) (bool, error) {
+	switch version {
+	case "", "latest":
+		return false, nil
+	case "published":
+		return true, nil
+	default:
+		return false, fmt.Errorf("version must be latest or published")
 	}
 }
 
-func workflowFromGet(row sqlcdb.GetWorkflowRow) Workflow {
-	return Workflow{
-		ID:                       row.ID,
-		Name:                     row.Name,
-		Description:              row.Description,
-		Status:                   string(row.Status),
-		LatestVersionID:          row.LatestVersionID,
-		LatestPublishedVersionID: row.LatestPublishedVersionID,
-		CreatedAt:                row.CreatedAt,
-		UpdatedAt:                row.UpdatedAt,
-		LastPublishedAt:          row.LastPublishedAt,
-	}
-}
-
-func emptyDraftGraph(versionID uuid.UUID) VersionGraph {
-	return VersionGraph{
-		ID:          versionID,
-		Version:     1,
-		PublishedAt: nil,
-		Nodes:       []Node{},
-		Edges:       []Edge{},
+func createdWorkflow(row sqlcdb.CreateWorkflowRow) WorkflowDetail {
+	return WorkflowDetail{
+		Workflow: Workflow{
+			ID:                       row.ID,
+			Name:                     row.Name,
+			Description:              row.Description,
+			Status:                   string(row.Status),
+			LatestVersionID:          row.LatestVersionID,
+			LatestPublishedVersionID: row.LatestPublishedVersionID,
+			CreatedAt:                row.CreatedAt,
+			UpdatedAt:                row.UpdatedAt,
+			LastPublishedAt:          row.LastPublishedAt,
+		},
+		Graph: VersionGraph{
+			ID:          row.LatestVersionID,
+			Version:     1,
+			PublishedAt: nil,
+			Nodes:       []Node{},
+			Edges:       []Edge{},
+		},
 	}
 }

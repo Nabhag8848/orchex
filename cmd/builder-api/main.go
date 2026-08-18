@@ -10,7 +10,6 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
-	sqlcdb "github.com/nabhag8848/orchex/internal/db/sqlc"
 	"github.com/nabhag8848/orchex/internal/handler"
 	"github.com/nabhag8848/orchex/internal/server"
 )
@@ -31,7 +30,7 @@ func main() {
 	defer pool.Close()
 
 	e := server.NewServer(server.Deps{
-		Workflows: handler.NewWorkflowHandler(sqlcdb.New(pool)),
+		Workflows: handler.NewWorkflowHandler(db.NewStore(pool)),
 	})
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}

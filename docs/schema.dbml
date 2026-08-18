@@ -137,6 +137,7 @@ Table nodes {
     PK is (workflow_version_id, id) so the same client node id can exist on v1 and v2 after fork.
     Within one version, id must be unique. Remap in Update response only on rare within-version collisions.
     config holds builder settings; runtime i/o is validated against node_types input/output schemas.
+    uq_nodes_version_name is DEFERRABLE INITIALLY DEFERRED (see workflow_edges note).
   '''
 }
 
@@ -165,11 +166,14 @@ Table workflow_edges {
     Conditional nodes use label=true and label=false for their two outgoing edges.
     PK is (workflow_version_id, id), same fork-stability rule as nodes.
     from/to FKs are composite: (workflow_version_id, from_node_id|to_node_id) → nodes.
+    ON DELETE CASCADE: deleting a node removes edges that use it as from or to.
+    uq_nodes_version_name and uq_workflow_edges_source_label are DEFERRABLE INITIALLY DEFERRED
+    so a save can upsert then delete extras in one transaction without unique collisions.
   '''
 }
 
-Ref: workflow_edges.(workflow_version_id, from_node_id) > nodes.(workflow_version_id, id)
-Ref: workflow_edges.(workflow_version_id, to_node_id) > nodes.(workflow_version_id, id)
+Ref: workflow_edges.(workflow_version_id, from_node_id) > nodes.(workflow_version_id, id) [delete: cascade]
+Ref: workflow_edges.(workflow_version_id, to_node_id) > nodes.(workflow_version_id, id) [delete: cascade]
 
 // ---------------------------------------------------------------------------
 // Execution (runtime)

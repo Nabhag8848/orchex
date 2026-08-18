@@ -288,7 +288,7 @@ Queue jobs carry identity—primarily `run_id` and `node_id`—instead of becomi
 
 **Candidate:** All routes use the `/v1` prefix. Authentication is assumed to be handled by middleware and is not part of these payloads.
 
-The API uses optimistic concurrency for workflow editing. Timestamps are UTC ISO-8601 strings. IDs are UUIDs in storage; readable IDs below are examples only.
+The API uses UTC ISO-8601 timestamps. IDs are UUIDs in storage; readable IDs below are examples only. Optimistic concurrency for workflow editing is deferred.
 
 ### Endpoint index
 
@@ -483,19 +483,18 @@ Requesting `published` before the first publish returns `404`. Archived workflow
 
 **Interviewer:** Do we patch individual graph operations?
 
-**Candidate:** No. Like n8n-style editors, the client sends the complete graph as the new truth. Optimistic concurrency prevents one editor from silently overwriting another.
+**Candidate:** No. Like n8n-style editors, the client sends the complete graph as the new truth.
 
 ```http
 PUT /v1/workflows/:id
 ```
 
-This is a complete replacement, not a patch:
+This is a complete replacement, not a patch. Node and edge IDs are client-generated UUID v4 values (same family as Postgres `gen_random_uuid()`).
 
 **Example full-graph request**
 
 ```json
 {
-  "expected_latest_version_id": "ver_01",
   "name": "Onboarding",
   "description": "User signup flow",
   "nodes": [
@@ -510,10 +509,7 @@ This is a complete replacement, not a patch:
       "id": "node_api",
       "node_type": "api",
       "name": "Create user",
-      "config": {
-        "method": "POST",
-        "url": "https://example.com/users"
-      },
+      "config": {},
       "position": { "x": 280, "y": 80 }
     }
   ],
@@ -531,15 +527,23 @@ This is a complete replacement, not a patch:
 Saving performs soft validation:
 
 - every `node_type` is known;
-- every `config` matches that node type's config schema;
 - every edge endpoint exists in the submitted graph;
 - node and edge IDs are unique within the version;
 - node `name` values are unique within the version;
-- `expected_latest_version_id` still matches the server's editable head.
+- at most one outgoing edge per `(from_node_id, label)`;
+- `label` is `default`, `true`, or `false`.
 
-An incomplete graph is allowed here. Same-version edge integrity is also enforced by composite foreign keys in Postgres when the graph is persisted.
+Config schema validation is deferred: every node is persisted with `config: {}`. An incomplete graph is allowed here. Same-version edge integrity is also enforced by composite foreign keys in Postgres.
 
-If the head is a draft, the server updates it in place. If the head is already published, the submitted graph becomes a new draft version. The response is `200 OK`:
+Versioning uses the two pointers on `workflows`:
+
+- `latest_published_version_id` is `null` → never published; update the draft in place;
+- published pointer equals `latest_version_id` → the head is live; insert a new draft version and write the graph there so running workflows stay on the published snapshot;
+- both pointers set and different → a draft already exists; update that version in place.
+
+The graph write is a sync: upsert payload nodes, delete nodes whose IDs are not in the payload, upsert payload edges, delete leftover edges. Deleting a node `ON DELETE CASCADE`s edges that used it as `from` or `to`. Unique `(workflow_version_id, name)` and `(workflow_version_id, from_node_id, label)` are `DEFERRABLE INITIALLY DEFERRED` so name and label swaps in one transaction do not fail mid-statement.
+
+If the head is a draft, the server updates it in place. If the head is already published, the submitted graph becomes a new draft version. The response is `200 OK` with the same `WorkflowDetail` shape as retrieve (`graph` is the complete saved head). Duplicate client IDs in the payload are a `400`; the server does not mint replacements.
 
 **Example saved-head response**
 
@@ -565,10 +569,7 @@ If the head is a draft, the server updates it in place. If the head is already p
         "id": "node_api",
         "node_type": "api",
         "name": "Create user",
-        "config": {
-          "method": "POST",
-          "url": "https://example.com/users"
-        },
+        "config": {},
         "position": { "x": 280, "y": 80 }
       }
     ],
@@ -580,14 +581,11 @@ If the head is a draft, the server updates it in place. If the head is already p
         "label": "default"
       }
     ]
-  },
-  "id_remaps": []
+  }
 }
 ```
 
-`graph` is the complete saved head. `id_remaps` reports the rare case where a client ID collides inside the target version and the server has to replace it. The element shape of each remap is not fully specified yet; treat the field as a reserved collision report until we lock the object fields.
-
-Validation failures return `400`, missing or archived workflows return `404`/`410`, and a stale expected version returns `409 Conflict`.
+Validation failures return `400`. Missing or archived workflows return `404`/`410`.
 
 #### Publish
 
@@ -999,9 +997,14 @@ erDiagram
     }
 ```
 
-The diagram is a readable overview. In particular, version and node-name uniqueness are composite—`(workflow_id, version)` and `(workflow_version_id, name)`—rather than single-column constraints. Composite keys, partial indexes, timestamps, nullability, and implementation notes remain fully specified in [schema.dbml](./schema.dbml).
+The diagram is a readable overview. In particular, version and node-name uniqueness are composite—`(workflow_id, version)` and `(workflow_version_id, name)`—rather than single-column constraints. Composite keys, partial indexes, timestamps, nullability, and implementation notes remain fully specified in [schema.dbml](./schema.dbml). Goose migrations live in `db/migrations/`: `00001` workflows, `00002` definition (versions, nodes, edges, timestamp triggers), `00003` node-type seed, `00004` save-time graph constraints (below).
 
 `created_at` is set with `DEFAULT now()` on insert. `updated_at` is maintained by a PostgreSQL `BEFORE UPDATE` trigger (`touch_updated_at`) on `node_types`, `workflows`, `nodes`, and `workflow_edges`. `workflow_versions` uses the same pattern on `last_updated_at` (`touch_last_updated_at`). Application `UPDATE` statements should not assign those columns; the trigger overwrites them on every row update. DBML cannot represent triggers, so the functions live in the goose migration.
+
+`00004_edge_node_delete_cascade.sql` is the follow-up to `00002` for Update:
+
+- `workflow_edges` composite FKs to `nodes` use `ON DELETE CASCADE`, so deleting a node removes edges that used it as `from` or `to`;
+- `uq_nodes_version_name` and `uq_workflow_edges_source_label` are `UNIQUE … DEFERRABLE INITIALLY DEFERRED`, so uniqueness is checked at `COMMIT`. A save can upsert then delete extras in one transaction without name or `(from, label)` swaps failing mid-statement.
 
 ### `node_types`
 
@@ -1053,12 +1056,12 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 
 - client-generated logical ID;
 - node type reference;
-- unique name within the version;
-- schema-validated JSON config;
+- unique name within the version (deferred unique, so swaps in one save are allowed);
+- JSON config (persisted as `{}` until config-schema validation lands);
 - optional canvas coordinates;
 - timestamps.
 
-That is deliberate: `node_start` may exist in both v1 and v2 because it is the same logical builder node, while each row still belongs to exactly one graph snapshot.
+That is deliberate: `node_start` may exist in both v1 and v2 because it is the same logical builder node, while each row still belongs to exactly one graph snapshot. Duplicate IDs in one version are a validation error; the server does not remap them.
 
 ### `workflow_edges`
 
@@ -1072,7 +1075,7 @@ That is deliberate: `node_start` may exist in both v1 and v2 because it is the s
 - `default`, `true`, or `false` label;
 - timestamps.
 
-The primary key is `(workflow_version_id, id)`. Composite foreign keys from source and target to `nodes(workflow_version_id, id)` prevent cross-version edges. `(workflow_version_id, from_node_id, label)` is unique.
+The primary key is `(workflow_version_id, id)`. Composite foreign keys from source and target to `nodes(workflow_version_id, id)` prevent cross-version edges and use `ON DELETE CASCADE` so a deleted node cannot leave orphan edges. `(workflow_version_id, from_node_id, label)` is unique and deferred to commit (see `00004`).
 
 ### `workflow_runs`
 
@@ -2146,7 +2149,8 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - start-run idempotency keys;
 - a standard HTTP error response body;
 - one consistent archived-resource status (`404` or `410`);
-- exact `id_remaps[]` element shape;
+- optimistic concurrency on Update (`expected_latest_version_id` / `409`);
+- config-schema validation on save (nodes currently persist `config: {}`);
 - reachability / exactly-one-Start as hard publish rules;
 - narrowing General API `output_schema.status` to 2xx if we want the schema itself to forbid non-2xx success shapes;
 - external idempotency keys, so a tight duplicate race cannot fire the same side effect twice;
@@ -2168,6 +2172,7 @@ These are not hidden assumptions. They are the next decisions the design needs.
 
 - [orchex.excalidraw](./orchex.excalidraw) — authoritative architecture, API, schema, execution deep-dive, queue-product, OLTP/RDS, graph data-structure, control-plane compute (ECS on Fargate), and Function isolation board.
 - [schema.dbml](./schema.dbml) — PostgreSQL OLTP schema.
+- [`db/migrations`](../db/migrations) — goose files, including `00004_edge_node_delete_cascade.sql` (edge `ON DELETE CASCADE` plus deferred uniques for save).
 - [bench/postgres](./bench/postgres) — Docker + pgbench harness and capacity notes behind the RDS decision.
 - [node-type-schemas](./node-type-schemas) — JSON Schema contracts for the v1 node types (including Function `source`).
 - [data-structure](./data-structure) — Go graph sketches and learning notes behind the graph data-structure deep dive.

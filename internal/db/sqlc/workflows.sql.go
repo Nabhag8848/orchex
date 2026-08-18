@@ -7,6 +7,7 @@ package sqlcdb
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -81,37 +82,86 @@ func (q *Queries) CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) 
 	return i, err
 }
 
-const getWorkflow = `-- name: GetWorkflow :one
+const getWorkflowDetail = `-- name: GetWorkflowDetail :one
 SELECT
-    id,
-    name,
-    description,
-    status,
-    latest_published_version_id,
-    latest_version_id,
-    created_at,
-    updated_at,
-    last_published_at
-FROM workflows
-WHERE id = $1
-  AND status != 'archived'
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_published_version_id,
+    w.latest_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    v.id AS graph_id,
+    v.version AS graph_version,
+    v.published_at AS graph_published_at,
+    CAST(COALESCE((
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', n.id,
+                'node_type', nt.type,
+                'name', n.name,
+                'config', n.config,
+                'position', CASE
+                    WHEN n.position_x IS NULL AND n.position_y IS NULL THEN NULL
+                    ELSE jsonb_build_object('x', n.position_x, 'y', n.position_y)
+                END
+            )
+            ORDER BY n.created_at, n.id
+        )
+        FROM nodes n
+        INNER JOIN node_types nt ON nt.id = n.node_type_id
+        WHERE n.workflow_version_id = v.id
+    ), '[]'::jsonb) AS jsonb) AS nodes,
+    CAST(COALESCE((
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', e.id,
+                'from_node_id', e.from_node_id,
+                'to_node_id', e.to_node_id,
+                'label', e.label
+            )
+            ORDER BY e.created_at, e.id
+        )
+        FROM workflow_edges e
+        WHERE e.workflow_version_id = v.id
+    ), '[]'::jsonb) AS jsonb) AS edges
+FROM workflows w
+INNER JOIN workflow_versions v
+    ON v.id = CASE
+        WHEN $1::bool THEN w.latest_published_version_id
+        ELSE w.latest_version_id
+    END
+WHERE w.id = $2
+  AND w.status != 'archived'
 `
 
-type GetWorkflowRow struct {
-	ID                       uuid.UUID      `json:"id"`
-	Name                     string         `json:"name"`
-	Description              *string        `json:"description"`
-	Status                   WorkflowStatus `json:"status"`
-	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
-	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
-	CreatedAt                time.Time      `json:"created_at"`
-	UpdatedAt                time.Time      `json:"updated_at"`
-	LastPublishedAt          *time.Time     `json:"last_published_at"`
+type GetWorkflowDetailParams struct {
+	Published bool      `json:"published"`
+	ID        uuid.UUID `json:"id"`
 }
 
-func (q *Queries) GetWorkflow(ctx context.Context, id uuid.UUID) (GetWorkflowRow, error) {
-	row := q.db.QueryRow(ctx, getWorkflow, id)
-	var i GetWorkflowRow
+type GetWorkflowDetailRow struct {
+	ID                       uuid.UUID       `json:"id"`
+	Name                     string          `json:"name"`
+	Description              *string         `json:"description"`
+	Status                   WorkflowStatus  `json:"status"`
+	LatestPublishedVersionID *uuid.UUID      `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID       `json:"latest_version_id"`
+	CreatedAt                time.Time       `json:"created_at"`
+	UpdatedAt                time.Time       `json:"updated_at"`
+	LastPublishedAt          *time.Time      `json:"last_published_at"`
+	GraphID                  uuid.UUID       `json:"graph_id"`
+	GraphVersion             int32           `json:"graph_version"`
+	GraphPublishedAt         *time.Time      `json:"graph_published_at"`
+	Nodes                    json.RawMessage `json:"nodes"`
+	Edges                    json.RawMessage `json:"edges"`
+}
+
+func (q *Queries) GetWorkflowDetail(ctx context.Context, arg GetWorkflowDetailParams) (GetWorkflowDetailRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowDetail, arg.Published, arg.ID)
+	var i GetWorkflowDetailRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -122,6 +172,77 @@ func (q *Queries) GetWorkflow(ctx context.Context, id uuid.UUID) (GetWorkflowRow
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastPublishedAt,
+		&i.GraphID,
+		&i.GraphVersion,
+		&i.GraphPublishedAt,
+		&i.Nodes,
+		&i.Edges,
 	)
 	return i, err
+}
+
+const getWorkflowHead = `-- name: GetWorkflowHead :one
+SELECT
+    id,
+    latest_published_version_id,
+    latest_version_id
+FROM workflows
+WHERE id = $1
+  AND status != 'archived'
+`
+
+type GetWorkflowHeadRow struct {
+	ID                       uuid.UUID  `json:"id"`
+	LatestPublishedVersionID *uuid.UUID `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID  `json:"latest_version_id"`
+}
+
+func (q *Queries) GetWorkflowHead(ctx context.Context, id uuid.UUID) (GetWorkflowHeadRow, error) {
+	row := q.db.QueryRow(ctx, getWorkflowHead, id)
+	var i GetWorkflowHeadRow
+	err := row.Scan(&i.ID, &i.LatestPublishedVersionID, &i.LatestVersionID)
+	return i, err
+}
+
+const updateWorkflow = `-- name: UpdateWorkflow :exec
+UPDATE workflows
+SET
+    name = $1,
+    description = $2,
+    latest_version_id = $3
+WHERE id = $4
+  AND status != 'archived'
+`
+
+type UpdateWorkflowParams struct {
+	Name            string    `json:"name"`
+	Description     *string   `json:"description"`
+	LatestVersionID uuid.UUID `json:"latest_version_id"`
+	ID              uuid.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateWorkflow(ctx context.Context, arg UpdateWorkflowParams) error {
+	_, err := q.db.Exec(ctx, updateWorkflow,
+		arg.Name,
+		arg.Description,
+		arg.LatestVersionID,
+		arg.ID,
+	)
+	return err
+}
+
+const workflowExists = `-- name: WorkflowExists :one
+SELECT EXISTS(
+    SELECT 1
+    FROM workflows
+    WHERE id = $1
+      AND status != 'archived'
+)
+`
+
+func (q *Queries) WorkflowExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

@@ -1,59 +1,88 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v5"
+	"github.com/nabhag8848/orchex/internal/db"
 	sqlcdb "github.com/nabhag8848/orchex/internal/db/sqlc"
 )
 
 type WorkflowHandler struct {
-	q *sqlcdb.Queries
+	store *db.Store
 }
 
-func NewWorkflowHandler(q *sqlcdb.Queries) *WorkflowHandler {
-	return &WorkflowHandler{q: q}
+func NewWorkflowHandler(store *db.Store) *WorkflowHandler {
+	return &WorkflowHandler{store: store}
 }
 
 func (h *WorkflowHandler) Create(c *echo.Context) error {
 	var req CreateWorkflowRequest
-	if err := echo.BindBody(c, &req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid json"})
-	}
-	if err := c.Validate(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	if err := bindJSON(c, &req); err != nil {
+		return err
 	}
 
-	wf, err := h.q.CreateWorkflow(c.Request().Context(), sqlcdb.CreateWorkflowParams{
+	wf, err := h.store.CreateWorkflow(c.Request().Context(), sqlcdb.CreateWorkflowParams{
 		Name:        req.Name,
 		Description: req.Description,
 	})
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create workflow"})
+		return internalError("failed to create workflow")
 	}
 
-	return c.JSON(http.StatusCreated, WorkflowDetail{
-		Workflow: workflowFromCreate(wf),
-		Graph:    emptyDraftGraph(wf.LatestVersionID),
-	})
+	return c.JSON(http.StatusCreated, createdWorkflow(wf))
 }
 
 func (h *WorkflowHandler) Get(c *echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
+	id, err := workflowID(c)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid workflow id"})
+		return err
 	}
 
-	wf, err := h.q.GetWorkflow(c.Request().Context(), id)
+	published, err := publishedRequested(c.QueryParam("version"))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return c.JSON(http.StatusNotFound, map[string]string{"error": "workflow not found"})
-		}
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to get workflow"})
+		return badRequest(err.Error())
 	}
 
-	return c.JSON(http.StatusOK, workflowFromGet(wf))
+	detail, err := getDetail(c.Request().Context(), h.store.Queries, id, published)
+	if err != nil {
+		return mapQueryError(id, err, "failed to get workflow")
+	}
+	return c.JSON(http.StatusOK, detail)
+}
+
+func (h *WorkflowHandler) Update(c *echo.Context) error {
+	id, err := workflowID(c)
+	if err != nil {
+		return err
+	}
+
+	ctx := c.Request().Context()
+	exists, err := h.store.WorkflowExists(ctx, id)
+	if err != nil {
+		return internalError("failed to get workflow")
+	}
+	if !exists {
+		return notFound(id)
+	}
+
+	var req UpdateWorkflowRequest
+	if err := bindJSON(c, &req); err != nil {
+		return err
+	}
+	req = req.withEmptyGraph()
+
+	types, err := loadNodeTypes(ctx, h.store.Queries)
+	if err != nil {
+		return internalError("failed to load node types")
+	}
+	if err := validateGraph(req.Nodes, req.Edges, types); err != nil {
+		return badRequest(err.Error())
+	}
+
+	detail, err := h.save(ctx, id, req, types)
+	if err != nil {
+		return mapQueryError(id, err, "failed to update workflow")
+	}
+	return c.JSON(http.StatusOK, detail)
 }

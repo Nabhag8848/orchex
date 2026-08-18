@@ -1,0 +1,66 @@
+package handler
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/labstack/echo/v5"
+)
+
+func JSONErrorHandler(c *echo.Context, err error) {
+	if r, unwrapErr := echo.UnwrapResponse(c.Response()); unwrapErr == nil && r != nil && r.Committed {
+		return
+	}
+
+	code := http.StatusInternalServerError
+	msg := http.StatusText(code)
+
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		code = he.Code
+		if he.Message != "" {
+			msg = he.Message
+		}
+	}
+
+	_ = c.JSON(code, map[string]string{"error": msg})
+}
+
+func badRequest(msg string) error {
+	return echo.NewHTTPError(http.StatusBadRequest, msg)
+}
+
+func notFound(id uuid.UUID) error {
+	return echo.NewHTTPError(http.StatusNotFound, "workflow "+id.String()+" not found")
+}
+
+func internalError(msg string) error {
+	return echo.NewHTTPError(http.StatusInternalServerError, msg)
+}
+
+func bindJSON(c *echo.Context, dst any) error {
+	if err := echo.BindBody(c, dst); err != nil {
+		return badRequest("invalid json")
+	}
+	if err := c.Validate(dst); err != nil {
+		return badRequest(err.Error())
+	}
+	return nil
+}
+
+func workflowID(c *echo.Context) (uuid.UUID, error) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return uuid.Nil, badRequest("invalid workflow id")
+	}
+	return id, nil
+}
+
+func mapQueryError(id uuid.UUID, err error, fallback string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return notFound(id)
+	}
+	return internalError(fallback)
+}

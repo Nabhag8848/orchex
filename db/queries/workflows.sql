@@ -1,17 +1,73 @@
--- name: GetWorkflow :one
+-- name: GetWorkflowHead :one
 SELECT
     id,
-    name,
-    description,
-    status,
     latest_published_version_id,
-    latest_version_id,
-    created_at,
-    updated_at,
-    last_published_at
+    latest_version_id
 FROM workflows
 WHERE id = $1
   AND status != 'archived';
+
+-- name: GetWorkflowDetail :one
+SELECT
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_published_version_id,
+    w.latest_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    v.id AS graph_id,
+    v.version AS graph_version,
+    v.published_at AS graph_published_at,
+    CAST(COALESCE((
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', n.id,
+                'node_type', nt.type,
+                'name', n.name,
+                'config', n.config,
+                'position', CASE
+                    WHEN n.position_x IS NULL AND n.position_y IS NULL THEN NULL
+                    ELSE jsonb_build_object('x', n.position_x, 'y', n.position_y)
+                END
+            )
+            ORDER BY n.created_at, n.id
+        )
+        FROM nodes n
+        INNER JOIN node_types nt ON nt.id = n.node_type_id
+        WHERE n.workflow_version_id = v.id
+    ), '[]'::jsonb) AS jsonb) AS nodes,
+    CAST(COALESCE((
+        SELECT jsonb_agg(
+            jsonb_build_object(
+                'id', e.id,
+                'from_node_id', e.from_node_id,
+                'to_node_id', e.to_node_id,
+                'label', e.label
+            )
+            ORDER BY e.created_at, e.id
+        )
+        FROM workflow_edges e
+        WHERE e.workflow_version_id = v.id
+    ), '[]'::jsonb) AS jsonb) AS edges
+FROM workflows w
+INNER JOIN workflow_versions v
+    ON v.id = CASE
+        WHEN sqlc.arg('published')::bool THEN w.latest_published_version_id
+        ELSE w.latest_version_id
+    END
+WHERE w.id = sqlc.arg('id')
+  AND w.status != 'archived';
+
+-- name: WorkflowExists :one
+SELECT EXISTS(
+    SELECT 1
+    FROM workflows
+    WHERE id = $1
+      AND status != 'archived'
+);
 
 -- name: CreateWorkflow :one
 WITH new_workflow AS (
@@ -46,3 +102,12 @@ SELECT
     w.last_published_at
 FROM new_workflow w
 INNER JOIN new_version v ON v.id = w.latest_version_id;
+
+-- name: UpdateWorkflow :exec
+UPDATE workflows
+SET
+    name = sqlc.arg('name'),
+    description = sqlc.narg('description'),
+    latest_version_id = sqlc.arg('latest_version_id')
+WHERE id = sqlc.arg('id')
+  AND status != 'archived';
