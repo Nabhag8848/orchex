@@ -12,6 +12,75 @@ import (
 	"github.com/google/uuid"
 )
 
+const createWorkflow = `-- name: CreateWorkflow :one
+WITH new_workflow AS (
+    INSERT INTO workflows (name, description, latest_version_id)
+    VALUES ($1, $2, gen_random_uuid())
+    RETURNING
+        id,
+        name,
+        description,
+        status,
+        latest_published_version_id,
+        latest_version_id,
+        created_at,
+        updated_at,
+        last_published_at
+),
+new_version AS (
+    INSERT INTO workflow_versions (id, workflow_id)
+    SELECT latest_version_id, id
+    FROM new_workflow
+    RETURNING id
+)
+SELECT
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_published_version_id,
+    w.latest_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at
+FROM new_workflow w
+INNER JOIN new_version v ON v.id = w.latest_version_id
+`
+
+type CreateWorkflowParams struct {
+	Name        string  `json:"name"`
+	Description *string `json:"description"`
+}
+
+type CreateWorkflowRow struct {
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+}
+
+func (q *Queries) CreateWorkflow(ctx context.Context, arg CreateWorkflowParams) (CreateWorkflowRow, error) {
+	row := q.db.QueryRow(ctx, createWorkflow, arg.Name, arg.Description)
+	var i CreateWorkflowRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.LatestPublishedVersionID,
+		&i.LatestVersionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastPublishedAt,
+	)
+	return i, err
+}
+
 const getWorkflow = `-- name: GetWorkflow :one
 SELECT
     id,

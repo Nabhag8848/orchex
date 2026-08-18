@@ -12,11 +12,13 @@ type Deps struct {
 
 func NewServer(deps Deps) *echo.Echo {
 	e := echo.New()
+	e.Validator = handler.NewRequestValidator()
 	e.Use(middleware.RequestID())
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
 
 	e.GET("/health/builder", handler.Health)
+	e.POST("/v1/workflows", deps.Workflows.Create)
 	e.GET("/v1/workflows/:id", deps.Workflows.Get)
 
 	return e
