@@ -204,6 +204,64 @@ func (q *Queries) GetWorkflowHead(ctx context.Context, id uuid.UUID) (GetWorkflo
 	return i, err
 }
 
+const listWorkflows = `-- name: ListWorkflows :many
+SELECT
+    id,
+    name,
+    description,
+    status,
+    latest_published_version_id,
+    latest_version_id,
+    created_at,
+    updated_at,
+    last_published_at
+FROM workflows
+WHERE status != 'archived'
+ORDER BY updated_at DESC, id
+`
+
+type ListWorkflowsRow struct {
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+}
+
+func (q *Queries) ListWorkflows(ctx context.Context) ([]ListWorkflowsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkflows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkflowsRow{}
+	for rows.Next() {
+		var i ListWorkflowsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Status,
+			&i.LatestPublishedVersionID,
+			&i.LatestVersionID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastPublishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateWorkflow = `-- name: UpdateWorkflow :exec
 UPDATE workflows
 SET

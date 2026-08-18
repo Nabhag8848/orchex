@@ -84,6 +84,10 @@ type WorkflowDetail struct {
 	Graph VersionGraph `json:"graph"`
 }
 
+type WorkflowList struct {
+	Items []Workflow `json:"items"`
+}
+
 func publishedRequested(version string) (bool, error) {
 	switch version {
 	case "", "latest":
@@ -92,6 +96,20 @@ func publishedRequested(version string) (bool, error) {
 		return true, nil
 	default:
 		return false, fmt.Errorf("version must be latest or published")
+	}
+}
+
+func workflowFromList(row sqlcdb.ListWorkflowsRow) Workflow {
+	return Workflow{
+		ID:                       row.ID,
+		Name:                     row.Name,
+		Description:              row.Description,
+		Status:                   string(row.Status),
+		LatestVersionID:          row.LatestVersionID,
+		LatestPublishedVersionID: row.LatestPublishedVersionID,
+		CreatedAt:                row.CreatedAt,
+		UpdatedAt:                row.UpdatedAt,
+		LastPublishedAt:          row.LastPublishedAt,
 	}
 }
 

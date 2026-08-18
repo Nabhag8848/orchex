@@ -61,6 +61,21 @@ INNER JOIN workflow_versions v
 WHERE w.id = sqlc.arg('id')
   AND w.status != 'archived';
 
+-- name: ListWorkflows :many
+SELECT
+    id,
+    name,
+    description,
+    status,
+    latest_published_version_id,
+    latest_version_id,
+    created_at,
+    updated_at,
+    last_published_at
+FROM workflows
+WHERE status != 'archived'
+ORDER BY updated_at DESC, id;
+
 -- name: WorkflowExists :one
 SELECT EXISTS(
     SELECT 1

@@ -16,6 +16,26 @@ func NewWorkflowHandler(store *db.Store) *WorkflowHandler {
 	return &WorkflowHandler{store: store}
 }
 
+func (h *WorkflowHandler) Register(g *echo.Group) {
+	g.POST("", h.Create)
+	g.GET("", h.List)
+	g.GET("/:id", h.Get)
+	g.PUT("/:id", h.Update)
+}
+
+func (h *WorkflowHandler) List(c *echo.Context) error {
+	rows, err := h.store.ListWorkflows(c.Request().Context())
+	if err != nil {
+		return internalError("failed to list workflows")
+	}
+
+	items := make([]Workflow, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, workflowFromList(row))
+	}
+	return c.JSON(http.StatusOK, WorkflowList{Items: items})
+}
+
 func (h *WorkflowHandler) Create(c *echo.Context) error {
 	var req CreateWorkflowRequest
 	if err := bindJSON(c, &req); err != nil {

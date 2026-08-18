@@ -18,10 +18,11 @@ func NewServer(deps Deps) *echo.Echo {
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
 
-	e.GET("/health/builder", handler.Health)
-	e.POST("/v1/workflows", deps.Workflows.Create)
-	e.GET("/v1/workflows/:id", deps.Workflows.Get)
-	e.PUT("/v1/workflows/:id", deps.Workflows.Update)
+	health := e.Group("/health")
+	health.GET("/builder", handler.Health)
+
+	v1 := e.Group("/v1")
+	deps.Workflows.Register(v1.Group("/workflows"))
 
 	return e
 }

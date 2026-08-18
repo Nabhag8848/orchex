@@ -454,8 +454,7 @@ The response is `200 OK`:
       "latest_published_version_id": "ver_01",
       "created_at": "...",
       "updated_at": "...",
-      "last_published_at": "...",
-      "has_unpublished_changes": true
+      "last_published_at": "..."
     }
   ]
 }
