@@ -10,7 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
-	"github.com/nabhag8848/orchex/internal/handler"
+	"github.com/nabhag8848/orchex/internal/handler/workflow"
 	"github.com/nabhag8848/orchex/internal/server"
 )
 
@@ -30,7 +30,7 @@ func main() {
 	defer pool.Close()
 
 	e := server.NewServer(server.Deps{
-		Workflows: handler.NewWorkflowHandler(db.NewStore(pool)),
+		Workflows: workflow.New(db.NewStore(pool)),
 	})
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}

@@ -1,4 +1,4 @@
-package handler
+package workflow
 
 import (
 	"encoding/json"
@@ -86,6 +86,25 @@ type WorkflowDetail struct {
 
 type WorkflowList struct {
 	Items []Workflow `json:"items"`
+}
+
+type PublishedVersion struct {
+	ID          uuid.UUID `json:"id"`
+	Version     int       `json:"version"`
+	PublishedAt time.Time `json:"published_at"`
+}
+
+type PublishWorkflowResponse struct {
+	ID                       uuid.UUID        `json:"id"`
+	Name                     string           `json:"name"`
+	Description              *string          `json:"description"`
+	Status                   string           `json:"status"`
+	LatestVersionID          uuid.UUID        `json:"latest_version_id"`
+	LatestPublishedVersionID uuid.UUID        `json:"latest_published_version_id"`
+	CreatedAt                time.Time        `json:"created_at"`
+	UpdatedAt                time.Time        `json:"updated_at"`
+	LastPublishedAt          time.Time        `json:"last_published_at"`
+	PublishedVersion         PublishedVersion `json:"published_version"`
 }
 
 func publishedRequested(version string) (bool, error) {

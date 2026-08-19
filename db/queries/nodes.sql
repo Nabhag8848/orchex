@@ -24,6 +24,19 @@ ON CONFLICT (workflow_version_id, id) DO UPDATE SET
     position_x = EXCLUDED.position_x,
     position_y = EXCLUDED.position_y;
 
+-- PK prefix (workflow_version_id, id); join node_types by PK for degree bounds.
+-- name: ListNodesForPublish :many
+SELECT
+    n.id,
+    nt.type,
+    nt.min_in_degree,
+    nt.max_in_degree,
+    nt.min_out_degree,
+    nt.max_out_degree
+FROM nodes n
+INNER JOIN node_types nt ON nt.id = n.node_type_id
+WHERE n.workflow_version_id = $1;
+
 -- cardinality 0 (empty payload) deletes every node in the version.
 -- name: DeleteNodesNotIn :exec
 DELETE FROM nodes

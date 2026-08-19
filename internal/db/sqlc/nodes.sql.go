@@ -32,6 +32,56 @@ func (q *Queries) DeleteNodesNotIn(ctx context.Context, arg DeleteNodesNotInPara
 	return err
 }
 
+const listNodesForPublish = `-- name: ListNodesForPublish :many
+SELECT
+    n.id,
+    nt.type,
+    nt.min_in_degree,
+    nt.max_in_degree,
+    nt.min_out_degree,
+    nt.max_out_degree
+FROM nodes n
+INNER JOIN node_types nt ON nt.id = n.node_type_id
+WHERE n.workflow_version_id = $1
+`
+
+type ListNodesForPublishRow struct {
+	ID           uuid.UUID `json:"id"`
+	Type         string    `json:"type"`
+	MinInDegree  int32     `json:"min_in_degree"`
+	MaxInDegree  int32     `json:"max_in_degree"`
+	MinOutDegree int32     `json:"min_out_degree"`
+	MaxOutDegree int32     `json:"max_out_degree"`
+}
+
+// PK prefix (workflow_version_id, id); join node_types by PK for degree bounds.
+func (q *Queries) ListNodesForPublish(ctx context.Context, workflowVersionID uuid.UUID) ([]ListNodesForPublishRow, error) {
+	rows, err := q.db.Query(ctx, listNodesForPublish, workflowVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNodesForPublishRow{}
+	for rows.Next() {
+		var i ListNodesForPublishRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.MinInDegree,
+			&i.MaxInDegree,
+			&i.MinOutDegree,
+			&i.MaxOutDegree,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertNodes = `-- name: UpsertNodes :exec
 INSERT INTO nodes (
     id,

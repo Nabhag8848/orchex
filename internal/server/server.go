@@ -4,10 +4,11 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/echo/v5/middleware"
 	"github.com/nabhag8848/orchex/internal/handler"
+	"github.com/nabhag8848/orchex/internal/handler/workflow"
 )
 
 type Deps struct {
-	Workflows *handler.WorkflowHandler
+	Workflows *workflow.Handler
 }
 
 func NewServer(deps Deps) *echo.Echo {

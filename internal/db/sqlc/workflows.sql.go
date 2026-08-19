@@ -220,6 +220,7 @@ SELECT
 FROM workflows
 WHERE id = $1
   AND status != 'archived'
+FOR UPDATE
 `
 
 type GetWorkflowHeadRow struct {
@@ -291,6 +292,130 @@ func (q *Queries) ListWorkflows(ctx context.Context) ([]ListWorkflowsRow, error)
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockWorkflowForPublish = `-- name: LockWorkflowForPublish :one
+SELECT
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_published_version_id,
+    w.latest_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    v.version AS head_version,
+    v.published_at AS head_published_at
+FROM workflows w
+INNER JOIN workflow_versions v ON v.id = w.latest_version_id
+WHERE w.id = $1
+  AND w.status != 'archived'
+FOR UPDATE OF w, v
+`
+
+type LockWorkflowForPublishRow struct {
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+	HeadVersion              int32          `json:"head_version"`
+	HeadPublishedAt          *time.Time     `json:"head_published_at"`
+}
+
+// Locks the workflow and its head version so publish and a concurrent save
+// cannot interleave. Index: workflows_pkey, then versions PK by latest_version_id.
+func (q *Queries) LockWorkflowForPublish(ctx context.Context, id uuid.UUID) (LockWorkflowForPublishRow, error) {
+	row := q.db.QueryRow(ctx, lockWorkflowForPublish, id)
+	var i LockWorkflowForPublishRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.LatestPublishedVersionID,
+		&i.LatestVersionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastPublishedAt,
+		&i.HeadVersion,
+		&i.HeadPublishedAt,
+	)
+	return i, err
+}
+
+const publishWorkflowHead = `-- name: PublishWorkflowHead :one
+WITH published_version AS (
+    UPDATE workflow_versions v
+    SET published_at = now()
+    WHERE v.id = $2
+      AND v.workflow_id = $1
+      AND v.published_at IS NULL
+    RETURNING v.id, v.version, v.published_at
+)
+UPDATE workflows w
+SET
+    status = 'published',
+    latest_published_version_id = pv.id,
+    last_published_at = pv.published_at
+FROM published_version pv
+WHERE w.id = $1
+  AND w.latest_version_id = pv.id
+  AND w.status != 'archived'
+RETURNING
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_version_id,
+    w.latest_published_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    pv.version AS published_version
+`
+
+type PublishWorkflowHeadParams struct {
+	ID        uuid.UUID `json:"id"`
+	VersionID uuid.UUID `json:"version_id"`
+}
+
+type PublishWorkflowHeadRow struct {
+	ID                       uuid.UUID      `json:"id"`
+	Name                     string         `json:"name"`
+	Description              *string        `json:"description"`
+	Status                   WorkflowStatus `json:"status"`
+	LatestVersionID          uuid.UUID      `json:"latest_version_id"`
+	LatestPublishedVersionID *uuid.UUID     `json:"latest_published_version_id"`
+	CreatedAt                time.Time      `json:"created_at"`
+	UpdatedAt                time.Time      `json:"updated_at"`
+	LastPublishedAt          *time.Time     `json:"last_published_at"`
+	PublishedVersion         int32          `json:"published_version"`
+}
+
+// Single statement: stamp the draft head, then point the live pointers at it.
+// Guards keep a stale caller from publishing a version that is no longer the head.
+func (q *Queries) PublishWorkflowHead(ctx context.Context, arg PublishWorkflowHeadParams) (PublishWorkflowHeadRow, error) {
+	row := q.db.QueryRow(ctx, publishWorkflowHead, arg.ID, arg.VersionID)
+	var i PublishWorkflowHeadRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.Status,
+		&i.LatestVersionID,
+		&i.LatestPublishedVersionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastPublishedAt,
+		&i.PublishedVersion,
+	)
+	return i, err
 }
 
 const updateWorkflow = `-- name: UpdateWorkflow :exec

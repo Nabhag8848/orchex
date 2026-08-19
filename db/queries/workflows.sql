@@ -5,7 +5,61 @@ SELECT
     latest_version_id
 FROM workflows
 WHERE id = $1
-  AND status != 'archived';
+  AND status != 'archived'
+FOR UPDATE;
+
+-- Locks the workflow and its head version so publish and a concurrent save
+-- cannot interleave. Index: workflows_pkey, then versions PK by latest_version_id.
+-- name: LockWorkflowForPublish :one
+SELECT
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_published_version_id,
+    w.latest_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    v.version AS head_version,
+    v.published_at AS head_published_at
+FROM workflows w
+INNER JOIN workflow_versions v ON v.id = w.latest_version_id
+WHERE w.id = sqlc.arg('id')
+  AND w.status != 'archived'
+FOR UPDATE OF w, v;
+
+-- Single statement: stamp the draft head, then point the live pointers at it.
+-- Guards keep a stale caller from publishing a version that is no longer the head.
+-- name: PublishWorkflowHead :one
+WITH published_version AS (
+    UPDATE workflow_versions v
+    SET published_at = now()
+    WHERE v.id = sqlc.arg('version_id')
+      AND v.workflow_id = sqlc.arg('id')
+      AND v.published_at IS NULL
+    RETURNING v.id, v.version, v.published_at
+)
+UPDATE workflows w
+SET
+    status = 'published',
+    latest_published_version_id = pv.id,
+    last_published_at = pv.published_at
+FROM published_version pv
+WHERE w.id = sqlc.arg('id')
+  AND w.latest_version_id = pv.id
+  AND w.status != 'archived'
+RETURNING
+    w.id,
+    w.name,
+    w.description,
+    w.status,
+    w.latest_version_id,
+    w.latest_published_version_id,
+    w.created_at,
+    w.updated_at,
+    w.last_published_at,
+    pv.version AS published_version;
 
 -- name: GetWorkflowDetail :one
 SELECT

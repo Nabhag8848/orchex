@@ -1,4 +1,4 @@
-.PHONY: sqlc migrate-up migrate-down migrate-status run compose-up compose-down compose-logs compose-ps
+.PHONY: sqlc migrate-up migrate-down migrate-status run test compose-up compose-down compose-logs compose-ps
 
 # Host-side targets (migrate-*, run) read DATABASE_URL from .env.
 # Compose loads .env via env_file; Make does not unless we export it here.
@@ -21,6 +21,9 @@ migrate-status:
 
 run:
 	go run ./cmd/builder-api
+
+test:
+	go test ./...
 
 # Full local stack: postgres + goose migrate + builder-api
 # Compose auto-loads .env for interpolation; services also use env_file: .env

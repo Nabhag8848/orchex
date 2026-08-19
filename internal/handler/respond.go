@@ -28,39 +28,31 @@ func JSONErrorHandler(c *echo.Context, err error) {
 	_ = c.JSON(code, map[string]string{"error": msg})
 }
 
-func badRequest(msg string) error {
+func BadRequest(msg string) error {
 	return echo.NewHTTPError(http.StatusBadRequest, msg)
 }
 
-func notFound(id uuid.UUID) error {
+func NotFound(id uuid.UUID) error {
 	return echo.NewHTTPError(http.StatusNotFound, "workflow "+id.String()+" not found")
 }
 
-func internalError(msg string) error {
+func InternalError(msg string) error {
 	return echo.NewHTTPError(http.StatusInternalServerError, msg)
 }
 
-func bindJSON(c *echo.Context, dst any) error {
+func BindJSON(c *echo.Context, dst any) error {
 	if err := echo.BindBody(c, dst); err != nil {
-		return badRequest("invalid json")
+		return BadRequest("invalid json")
 	}
 	if err := c.Validate(dst); err != nil {
-		return badRequest(err.Error())
+		return BadRequest(err.Error())
 	}
 	return nil
 }
 
-func workflowID(c *echo.Context) (uuid.UUID, error) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return uuid.Nil, badRequest("invalid workflow id")
-	}
-	return id, nil
-}
-
-func mapQueryError(id uuid.UUID, err error, fallback string) error {
+func MapQueryError(id uuid.UUID, err error, fallback string) error {
 	if errors.Is(err, pgx.ErrNoRows) {
-		return notFound(id)
+		return NotFound(id)
 	}
-	return internalError(fallback)
+	return InternalError(fallback)
 }

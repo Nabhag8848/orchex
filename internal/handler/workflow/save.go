@@ -1,4 +1,4 @@
-package handler
+package workflow
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	sqlcdb "github.com/nabhag8848/orchex/internal/db/sqlc"
 )
 
-func (h *WorkflowHandler) save(ctx context.Context, id uuid.UUID, req UpdateWorkflowRequest, types nodeTypes) (WorkflowDetail, error) {
+func (h *Handler) save(ctx context.Context, id uuid.UUID, req UpdateWorkflowRequest, types nodeTypes) (WorkflowDetail, error) {
 	var detail WorkflowDetail
 	err := h.store.InTx(ctx, func(q *sqlcdb.Queries) error {
 		head, err := q.GetWorkflowHead(ctx, id)

@@ -18,6 +18,12 @@ ON CONFLICT (workflow_version_id, id) DO UPDATE SET
     to_node_id = EXCLUDED.to_node_id,
     label = EXCLUDED.label;
 
+-- PK prefix (workflow_version_id, id). No sort: validation does not need order.
+-- name: ListEdgesForPublish :many
+SELECT id, from_node_id, to_node_id, label
+FROM workflow_edges
+WHERE workflow_version_id = $1;
+
 -- cardinality 0 (empty payload) deletes every edge in the version.
 -- name: DeleteEdgesNotIn :exec
 DELETE FROM workflow_edges
