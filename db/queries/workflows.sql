@@ -126,3 +126,21 @@ SET
     latest_version_id = sqlc.arg('latest_version_id')
 WHERE id = sqlc.arg('id')
   AND status != 'archived';
+
+-- name: ArchiveWorkflow :one
+WITH existing AS (
+    SELECT w.id, w.status
+    FROM workflows w
+    WHERE w.id = sqlc.arg('id')
+),
+updated AS (
+    UPDATE workflows w
+    SET status = 'archived'
+    FROM existing
+    WHERE w.id = existing.id
+      AND existing.status != 'archived'
+    RETURNING w.id
+)
+SELECT
+    EXISTS(SELECT 1 FROM existing) AS found,
+    EXISTS(SELECT 1 FROM updated) AS archived;

@@ -21,6 +21,7 @@ func (h *WorkflowHandler) Register(g *echo.Group) {
 	g.GET("", h.List)
 	g.GET("/:id", h.Get)
 	g.PUT("/:id", h.Update)
+	g.DELETE("/:id", h.Archive)
 }
 
 func (h *WorkflowHandler) List(c *echo.Context) error {
@@ -105,4 +106,20 @@ func (h *WorkflowHandler) Update(c *echo.Context) error {
 		return mapQueryError(id, err, "failed to update workflow")
 	}
 	return c.JSON(http.StatusOK, detail)
+}
+
+func (h *WorkflowHandler) Archive(c *echo.Context) error {
+	id, err := workflowID(c)
+	if err != nil {
+		return err
+	}
+
+	result, err := h.store.ArchiveWorkflow(c.Request().Context(), id)
+	if err != nil {
+		return internalError("failed to archive workflow")
+	}
+	if !result.Found {
+		return notFound(id)
+	}
+	return c.NoContent(http.StatusNoContent)
 }

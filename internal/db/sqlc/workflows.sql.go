@@ -13,6 +13,37 @@ import (
 	"github.com/google/uuid"
 )
 
+const archiveWorkflow = `-- name: ArchiveWorkflow :one
+WITH existing AS (
+    SELECT w.id, w.status
+    FROM workflows w
+    WHERE w.id = $1
+),
+updated AS (
+    UPDATE workflows w
+    SET status = 'archived'
+    FROM existing
+    WHERE w.id = existing.id
+      AND existing.status != 'archived'
+    RETURNING w.id
+)
+SELECT
+    EXISTS(SELECT 1 FROM existing) AS found,
+    EXISTS(SELECT 1 FROM updated) AS archived
+`
+
+type ArchiveWorkflowRow struct {
+	Found    bool `json:"found"`
+	Archived bool `json:"archived"`
+}
+
+func (q *Queries) ArchiveWorkflow(ctx context.Context, id uuid.UUID) (ArchiveWorkflowRow, error) {
+	row := q.db.QueryRow(ctx, archiveWorkflow, id)
+	var i ArchiveWorkflowRow
+	err := row.Scan(&i.Found, &i.Archived)
+	return i, err
+}
+
 const createWorkflow = `-- name: CreateWorkflow :one
 WITH new_workflow AS (
     INSERT INTO workflows (name, description, latest_version_id)
