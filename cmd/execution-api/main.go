@@ -11,6 +11,7 @@ import (
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/execution"
+	"github.com/nabhag8848/orchex/internal/handler/run"
 )
 
 func main() {
@@ -28,7 +29,9 @@ func main() {
 	}
 	defer pool.Close()
 
-	e := execution.NewServer()
+	e := execution.NewServer(execution.Deps{
+		Runs: run.New(db.NewStore(pool)),
+	})
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}
 	if err := sc.Start(ctx, e); err != nil {
