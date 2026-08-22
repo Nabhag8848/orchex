@@ -8,10 +8,9 @@ import (
 	"syscall"
 
 	"github.com/labstack/echo/v5"
-	"github.com/nabhag8848/orchex/internal/builder"
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
-	"github.com/nabhag8848/orchex/internal/handler/workflow"
+	"github.com/nabhag8848/orchex/internal/execution"
 )
 
 func main() {
@@ -29,9 +28,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	e := builder.NewServer(builder.Deps{
-		Workflows: workflow.New(db.NewStore(pool)),
-	})
+	e := execution.NewServer()
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}
 	if err := sc.Start(ctx, e); err != nil {

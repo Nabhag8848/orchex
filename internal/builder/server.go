@@ -1,10 +1,10 @@
-package server
+package builder
 
 import (
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 	"github.com/nabhag8848/orchex/internal/handler"
 	"github.com/nabhag8848/orchex/internal/handler/workflow"
+	httpserver "github.com/nabhag8848/orchex/internal/http-server"
 )
 
 type Deps struct {
@@ -12,12 +12,7 @@ type Deps struct {
 }
 
 func NewServer(deps Deps) *echo.Echo {
-	e := echo.New()
-	e.Validator = handler.NewRequestValidator()
-	e.HTTPErrorHandler = handler.JSONErrorHandler
-	e.Use(middleware.RequestID())
-	e.Use(middleware.RequestLogger())
-	e.Use(middleware.Recover())
+	e := httpserver.New()
 
 	health := e.Group("/health")
 	health.GET("/builder", handler.Health)

@@ -6,6 +6,13 @@ module "ecr_builder_api" {
   service         = "builder-api"
 }
 
+module "ecr_execution_api" {
+  source = "./modules/ecr"
+
+  repository_name = "orchex-execution-api"
+  service         = "execution-api"
+}
+
 module "ecr_db_migrate" {
   source = "./modules/ecr"
 

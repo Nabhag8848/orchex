@@ -8,6 +8,16 @@ output "ecr_builder_api" {
   }
 }
 
+output "ecr_execution_api" {
+  description = "ECR repository for the workflow execution API"
+  value = {
+    repository_arn         = module.ecr_execution_api.repository_arn
+    repository_name        = module.ecr_execution_api.repository_name
+    repository_registry_id = module.ecr_execution_api.repository_registry_id
+    repository_url         = module.ecr_execution_api.repository_url
+  }
+}
+
 output "ecr_db_migrate" {
   description = "ECR repository for shared database migrations (goose)"
   value = {

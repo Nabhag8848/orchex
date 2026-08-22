@@ -43,3 +43,23 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  execution-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.execution.local
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${EXECUTION_HTTP_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/execution"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
