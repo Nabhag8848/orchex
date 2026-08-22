@@ -80,7 +80,7 @@ This document tells the story of the design as a conversation between an intervi
 We deliberately validate in two stages:
 
 1. **Save is forgiving.** A draft is work in progress. It may be disconnected or incomplete while somebody is drawing it.
-2. **Publish is strict.** A published workflow must be non-empty, acyclic, and satisfy the degree rules for every node type.
+2. **Publish is strict.** A published workflow must be non-empty, have exactly one Start, be fully reachable from that Start, be acyclic, satisfy degree rules for every node type, and use the correct edge labels (`true`/`false` on Conditional, `default` elsewhere).
 
 This separation matters. If every save required a runnable graph, the builder would fight the user. If publish accepted an unfinished graph, the execution engine would inherit a problem it cannot safely solve.
 
@@ -110,7 +110,7 @@ Agent, Router, Scheduler, and Integration Action nodes are intentionally deferre
 
 **Candidate:** A DAG gives us a finite execution path and a valid topological order. More importantly, it keeps v1 recovery understandable: a worker executes a node, stores a checkpoint, and schedules the next node. A cycle would turn that into loop semantics—iteration limits, repeated state, and more complicated retry rules—which is a separate feature rather than a small extension.
 
-How we represent that graph in memory, check degrees, detect cycles, and derive an execution order is covered in the [graph data-structure deep dive](#8-deep-dive-design-graph-data-structure). The Go sketches in [data-structure](./data-structure) are the learning notes behind that board. Reachability from Start is a useful check there, but it is not yet part of the published hard-validation checklist.
+How we represent that graph in memory, check degrees, detect cycles, and derive an execution order is covered in the [graph data-structure deep dive](#8-deep-dive-design-graph-data-structure). The Go sketches in [data-structure](./data-structure) are the learning notes behind that board. Publish hard-validation uses those same ideas: exactly one Start, reachability from Start, degree bounds, edge labels, and Kahn cycle detection.
 
 ### How does draft and publish work?
 
@@ -598,15 +598,18 @@ POST /v1/workflows/:id/publish
 
 Request body: `{}`.
 
-Publish performs hard validation:
+Publish performs hard validation, in order:
 
 - the graph is not empty;
-- it is a DAG (no cycles);
-- node degrees match their node types.
+- there is exactly one Start node;
+- every node satisfies its type’s in-degree and out-degree bounds;
+- Conditional outgoing edges are labeled `true` and `false`; all other outgoing edges use `default`;
+- the graph is a DAG (no cycles; Kahn peel);
+- every node is reachable from Start.
 
-Config validity, edge endpoints, and unique IDs remain soft-validation concerns from Update. Same-version edge and checkpoint integrity come from the database foreign keys. Reachability from Start and “exactly one Start” are not yet on the hard-validation checklist.
+Config validity remains deferred (nodes still persist `config: {}` on save). Edge endpoints and unique IDs remain soft-validation concerns from Update. Same-version edge integrity comes from the database foreign keys.
 
-The response is `200 OK`:
+The response is `200 OK` with workflow metadata (no graph body — the client already has what it published):
 
 **Example publish response**
 
@@ -614,9 +617,12 @@ The response is `200 OK`:
 {
   "id": "wf_01",
   "name": "Onboarding",
+  "description": "Welcome flow",
   "status": "published",
   "latest_version_id": "ver_02",
   "latest_published_version_id": "ver_02",
+  "created_at": "2026-07-14T10:00:00Z",
+  "updated_at": "2026-07-15T09:00:00Z",
   "last_published_at": "2026-07-15T09:00:00Z",
   "published_version": {
     "id": "ver_02",
@@ -626,7 +632,7 @@ The response is `200 OK`:
 }
 ```
 
-The response is intentionally thin; the client already has the graph it published. Publishing a head that is already live is an idempotent `200` no-op. Validation failures return `400`; missing or archived workflows return `404`/`410`.
+Publishing a head that is already live is an idempotent `200` no-op. Validation failures return `400`; missing or archived workflows return `404`/`410`.
 
 #### Archive
 
@@ -646,7 +652,7 @@ The response is `204 No Content`. This is a soft delete: status becomes `archive
 
 **Interviewer:** How does execution begin?
 
-**Candidate:** Start pins the latest published version and creates a `pending` run at that version's Start node. The execution contract expects a usable Start node; enforcing exactly one Start during publish remains an explicitly tracked validation gap.
+**Candidate:** Start pins the latest published version and creates a `pending` run at that version's Start node. Publish already guarantees exactly one Start and full reachability from it, so the run can resolve `current_node_id` without an extra graph check.
 
 ```http
 POST /v1/workflows/:workflow_id/runs
@@ -1783,7 +1789,7 @@ flowchart LR
 | No safe “run A before B” list for the whole graph      | A topological order always exists   |
 | Retry and checkpoint semantics grow into loop features | Checkpoint → next node stays simple |
 
-Drafts may be messy while someone is drawing. **Publish** is where we insist: non-empty, acyclic, and degree rules satisfied.
+Drafts may be messy while someone is drawing. **Publish** is where we insist: non-empty, exactly one Start, reachable from Start, acyclic, degree rules, and correct edge labels.
 
 ### How do we detect a cycle without drowning in theory?
 
@@ -2149,8 +2155,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - a standard HTTP error response body;
 - one consistent archived-resource status (`404` or `410`);
 - optimistic concurrency on Update (`expected_latest_version_id` / `409`);
-- config-schema validation on save (nodes currently persist `config: {}`);
-- reachability / exactly-one-Start as hard publish rules;
+- config-schema validation on save and publish (nodes currently persist `config: {}`);
 - narrowing General API `output_schema.status` to 2xx if we want the schema itself to forbid non-2xx success shapes;
 - external idempotency keys, so a tight duplicate race cannot fire the same side effect twice;
 - pause/stop races for long-running nodes;
