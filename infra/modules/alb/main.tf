@@ -39,8 +39,50 @@ module "this" {
     http = {
       port     = 80
       protocol = "HTTP"
-      forward = {
-        target_group_key = "builder"
+      fixed_response = {
+        content_type = "application/json"
+        message_body = "{\"error\":\"not found\"}"
+        status_code  = "404"
+      }
+
+      rules = {
+        builder = {
+          priority = 10
+          actions = [{
+            forward = {
+              target_group_key = "builder"
+            }
+          }]
+          conditions = [{
+            path_pattern = {
+              values = [
+                "/health/builder",
+                "/health/builder/*",
+                "/v1/workflows",
+                "/v1/workflows/*",
+              ]
+            }
+          }]
+        }
+
+        execution = {
+          priority = 20
+          actions = [{
+            forward = {
+              target_group_key = "execution"
+            }
+          }]
+          conditions = [{
+            path_pattern = {
+              values = [
+                "/health/execution",
+                "/health/execution/*",
+                "/v1/runs",
+                "/v1/runs/*",
+              ]
+            }
+          }]
+        }
       }
     }
   }
@@ -55,6 +97,19 @@ module "this" {
       health_check = {
         enabled  = true
         path     = "/health/builder"
+        protocol = "HTTP"
+        matcher  = "200"
+      }
+    }
+    execution = {
+      name              = "orchex-execution-api"
+      protocol          = "HTTP"
+      port              = 8080
+      target_type       = "ip"
+      create_attachment = false
+      health_check = {
+        enabled  = true
+        path     = "/health/execution"
         protocol = "HTTP"
         matcher  = "200"
       }

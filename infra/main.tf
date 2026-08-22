@@ -92,3 +92,17 @@ module "ecs_builder_api" {
   data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
   database_url_secret_arn             = module.database_url.arn
 }
+
+module "ecs_execution_api" {
+  source         = "./modules/ecs_service"
+  name           = "orchex-execution-api"
+  service        = "execution-api"
+  cluster_arn    = module.ecs.arn
+  container_name = "execution-api"
+  image          = "${module.ecr_execution_api.repository_url}:latest"
+
+  target_group_arn                    = module.alb.target_groups["execution"].arn
+  alb_security_group_id               = module.alb.security_group_id
+  data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
+  database_url_secret_arn             = module.database_url.arn
+}

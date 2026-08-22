@@ -33,7 +33,8 @@ This starts:
 
 1. **postgres** — PostgreSQL 17 (`postgres:17-alpine`)
 2. **migrate** — goose applies `db/migrations`
-3. **builder-api** — API on port `8080` (after migrate succeeds)
+3. **builder-api** — workflows API on host port `8080` (after migrate succeeds)
+4. **execution-api** — execution API on host port `8081` (after migrate succeeds)
 
 Useful commands:
 
@@ -48,7 +49,12 @@ make compose-down
 ```bash
 curl http://localhost:8080/health/builder
 # → {"status":"ok"}
+
+curl http://localhost:8081/health/execution
+# → {"status":"ok"}
 ```
+
+Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`).
 
 Workflows live in the `public.workflows` table. Example:
 
@@ -64,6 +70,13 @@ With Compose Postgres already up:
 make migrate-status
 ```
 
+Host APIs (need `DATABASE_URL` in `.env`):
+
+```bash
+make run              # builder-api on HTTP_ADDR (default :8080)
+make run-execution    # execution-api
+```
+
 After changing SQL queries or migrations:
 
 ```bash
@@ -72,14 +85,14 @@ make sqlc
 
 ## Local vs production
 
-|                | Local                                          | Production                                                                                                   |
-| -------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Compute**    | Docker Compose (`Dockerfile.local`)            | ECS Fargate (`Dockerfile` — `linux/amd64`, distroless)                                                       |
-| **Database**   | `postgres:17-alpine` in Compose                | Amazon RDS for PostgreSQL 17                                                                                 |
-| **Config**     | `.env` from `.env.example`                     | Task definition / secrets (see `.env.production.example`)                                                    |
-| **Migrations** | goose one-shot `migrate` service on compose up | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations)) |
-| **TLS to DB**  | `sslmode=disable`                              | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                         |
-| **Networking** | localhost ports `5432` / `8080`                | ALB → ECS; ECS talks to RDS in the VPC                                                                       |
+|                | Local                                                             | Production                                                                                                   |
+| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Compute**    | Docker Compose (`Dockerfile.local`, `Dockerfile.execution.local`) | ECS Fargate (`Dockerfile` / `Dockerfile.execution` — `linux/amd64`, distroless)                              |
+| **Database**   | `postgres:17-alpine` in Compose                                   | Amazon RDS for PostgreSQL 17                                                                                 |
+| **Config**     | `.env` from `.env.example`                                        | Task definition / secrets (see `.env.production.example`)                                                    |
+| **Migrations** | goose one-shot `migrate` service on compose up                    | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations)) |
+| **TLS to DB**  | `sslmode=disable`                                                 | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                         |
+| **Networking** | localhost ports `5432` / `8080` / `8081`                          | ALB path rules → ECS; ECS talks to RDS in the VPC                                                            |
 
 Infra (ECR, ALB, ECS, RDS, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 

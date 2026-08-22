@@ -140,3 +140,34 @@ output "ecs_builder_api" {
     infrastructure_iam_role_name  = module.ecs_builder_api.infrastructure_iam_role_name
   }
 }
+
+output "ecs_execution_api" {
+  description = "ECS service for the workflow execution API"
+  value = {
+    id                            = module.ecs_execution_api.id
+    name                          = module.ecs_execution_api.name
+    iam_role_name                 = module.ecs_execution_api.iam_role_name
+    iam_role_arn                  = module.ecs_execution_api.iam_role_arn
+    iam_role_unique_id            = module.ecs_execution_api.iam_role_unique_id
+    container_definitions         = module.ecs_execution_api.container_definitions
+    task_definition_arn           = module.ecs_execution_api.task_definition_arn
+    task_definition_revision      = module.ecs_execution_api.task_definition_revision
+    task_definition_family        = module.ecs_execution_api.task_definition_family
+    task_exec_iam_role_name       = module.ecs_execution_api.task_exec_iam_role_name
+    task_exec_iam_role_arn        = module.ecs_execution_api.task_exec_iam_role_arn
+    task_exec_iam_role_unique_id  = module.ecs_execution_api.task_exec_iam_role_unique_id
+    tasks_iam_role_name           = module.ecs_execution_api.tasks_iam_role_name
+    tasks_iam_role_arn            = module.ecs_execution_api.tasks_iam_role_arn
+    tasks_iam_role_unique_id      = module.ecs_execution_api.tasks_iam_role_unique_id
+    task_set_id                   = module.ecs_execution_api.task_set_id
+    task_set_arn                  = module.ecs_execution_api.task_set_arn
+    task_set_stability_status     = module.ecs_execution_api.task_set_stability_status
+    task_set_status               = module.ecs_execution_api.task_set_status
+    autoscaling_policies          = module.ecs_execution_api.autoscaling_policies
+    autoscaling_scheduled_actions = module.ecs_execution_api.autoscaling_scheduled_actions
+    security_group_arn            = module.ecs_execution_api.security_group_arn
+    security_group_id             = module.ecs_execution_api.security_group_id
+    infrastructure_iam_role_arn   = module.ecs_execution_api.infrastructure_iam_role_arn
+    infrastructure_iam_role_name  = module.ecs_execution_api.infrastructure_iam_role_name
+  }
+}
