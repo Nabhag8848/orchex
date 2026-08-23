@@ -76,3 +76,53 @@ variable "database_url_secret_arn" {
   default     = null
   nullable    = true
 }
+
+variable "extra_environment" {
+  type = list(object({
+    name  = string
+    value = string
+  }))
+  description = "Additional container environment variables (merged after HTTP_ADDR)"
+  default     = []
+  nullable    = false
+}
+
+variable "tasks_iam_role_name" {
+  type        = string
+  description = "Name of the ECS task role. Set with tasks_iam_role_use_name_prefix = false for a stable ARN (queue policies)."
+  default     = null
+  nullable    = true
+}
+
+variable "tasks_iam_role_use_name_prefix" {
+  type        = bool
+  description = "When true, AWS appends a unique suffix to the task role name"
+  default     = true
+  nullable    = false
+}
+
+variable "tasks_iam_role_statements" {
+  type = list(object({
+    sid           = optional(string)
+    actions       = optional(list(string))
+    not_actions   = optional(list(string))
+    effect        = optional(string)
+    resources     = optional(list(string))
+    not_resources = optional(list(string))
+    principals = optional(list(object({
+      type        = string
+      identifiers = list(string)
+    })))
+    not_principals = optional(list(object({
+      type        = string
+      identifiers = list(string)
+    })))
+    condition = optional(list(object({
+      test     = string
+      values   = list(string)
+      variable = string
+    })))
+  }))
+  description = "Extra IAM statements attached to the ECS task role"
+  default     = null
+}

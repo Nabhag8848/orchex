@@ -10,9 +10,12 @@ data "aws_subnets" "default" {
 }
 
 locals {
-  container_environment = [
-    { name = "HTTP_ADDR", value = ":8080" },
-  ]
+  container_environment = concat(
+    [
+      { name = "HTTP_ADDR", value = ":8080" },
+    ],
+    var.extra_environment,
+  )
 
   container_secrets = var.database_url_secret_arn != null ? [
     {
@@ -42,6 +45,10 @@ module "this" {
   security_group_ids = [var.data_plane_client_security_group_id]
 
   task_exec_secret_arns = var.database_url_secret_arn != null ? [var.database_url_secret_arn] : []
+
+  tasks_iam_role_name            = var.tasks_iam_role_name
+  tasks_iam_role_use_name_prefix = var.tasks_iam_role_use_name_prefix
+  tasks_iam_role_statements      = var.tasks_iam_role_statements
 
   container_definitions = {
     (var.container_name) = {

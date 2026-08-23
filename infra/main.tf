@@ -26,6 +26,13 @@ module "alb" {
   name = "orchex-alb"
 }
 
+module "sqs_node_jobs" {
+  source = "./modules/sqs"
+
+  name                   = "orchex-node-jobs"
+  allowed_task_role_name = "orchex-execution-api"
+}
+
 
 module "ecs" {
   source = "./modules/ecs"
@@ -105,4 +112,21 @@ module "ecs_execution_api" {
   alb_security_group_id               = module.alb.security_group_id
   data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
   database_url_secret_arn             = module.database_url.arn
+
+  # Stable task role name so the SQS resource policy can allow this principal
+  # without a Terraform cycle (queue ARN ↔ role ARN).
+  tasks_iam_role_name            = "orchex-execution-api"
+  tasks_iam_role_use_name_prefix = false
+  extra_environment = [
+    { name = "SQS_QUEUE_URL", value = module.sqs_node_jobs.queue_url },
+    { name = "SQS_DLQ_URL", value = module.sqs_node_jobs.dead_letter_queue_url },
+  ]
+  tasks_iam_role_statements = [{
+    sid     = "NodeJobsQueue"
+    actions = module.sqs_node_jobs.queue_actions
+    resources = [
+      module.sqs_node_jobs.queue_arn,
+      module.sqs_node_jobs.dead_letter_queue_arn,
+    ]
+  }]
 }

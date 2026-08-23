@@ -28,6 +28,19 @@ output "ecr_db_migrate" {
   }
 }
 
+output "sqs_node_jobs" {
+  description = "SQS standard queue for node jobs plus attached DLQ"
+  value = {
+    queue_arn              = module.sqs_node_jobs.queue_arn
+    queue_url              = module.sqs_node_jobs.queue_url
+    queue_name             = module.sqs_node_jobs.queue_name
+    dead_letter_queue_arn  = module.sqs_node_jobs.dead_letter_queue_arn
+    dead_letter_queue_url  = module.sqs_node_jobs.dead_letter_queue_url
+    dead_letter_queue_name = module.sqs_node_jobs.dead_letter_queue_name
+    allowed_task_role_arn  = module.sqs_node_jobs.allowed_task_role_arn
+  }
+}
+
 output "alb" {
   description = "Application load balancer"
   value = {
