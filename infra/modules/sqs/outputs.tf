@@ -28,12 +28,22 @@ output "dead_letter_queue_name" {
   value       = module.this.dead_letter_queue_name
 }
 
-output "allowed_task_role_arn" {
-  description = "IAM role ARN allowed by the queue resource policies"
-  value       = local.allowed_task_role_arn
+output "producer_task_role_arn" {
+  description = "IAM role ARN allowed to produce (execution-api)"
+  value       = local.producer_task_role_arn
 }
 
-output "queue_actions" {
-  description = "SQS actions granted to the execution-api task role"
-  value       = local.queue_actions
+output "consumer_task_role_arn" {
+  description = "IAM role ARN allowed to consume (worker); null when unset"
+  value       = local.consumer_task_role_arn
+}
+
+output "producer_queue_actions" {
+  description = "SQS actions for the execution-api task role"
+  value       = local.producer_queue_actions
+}
+
+output "consumer_queue_actions" {
+  description = "SQS actions for the worker task role (source queue only)"
+  value       = local.consumer_queue_actions
 }

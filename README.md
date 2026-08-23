@@ -35,6 +35,8 @@ This starts:
 2. **migrate** — goose applies `db/migrations`
 3. **builder-api** — workflows API on host port `8080` (after migrate succeeds)
 4. **execution-api** — execution API on host port `8081` (after migrate succeeds)
+5. **execution-worker** — internal worker on host port `8082`
+6. **sqs** — ElasticMQ (SQS-compatible) on host port `9324`
 
 Useful commands:
 
@@ -52,9 +54,25 @@ curl http://localhost:8080/health/builder
 
 curl http://localhost:8081/health/execution
 # → {"status":"ok"}
+
+curl http://localhost:8082/health/worker
+# → {"status":"ok"}
 ```
 
-Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`).
+Local SQS (ElasticMQ) — send a message, then watch the worker:
+
+```bash
+aws --endpoint-url http://localhost:9324 sqs send-message \
+  --queue-url http://localhost:9324/000000000000/orchex-node-jobs \
+  --message-body '{"run_id":"smoke","node_id":"smoke","attempt":1,"source":"cli"}' \
+  --region ap-south-1
+
+docker compose logs -f execution-worker
+```
+
+Dummy AWS keys in `.env` (`test` / `test`) are enough for ElasticMQ.
+
+Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`), and the worker with `WORKER_HTTP_PORT` (default `8082`).
 
 Workflows live in the `public.workflows` table. Example:
 
@@ -75,6 +93,7 @@ Host APIs (need `DATABASE_URL` in `.env`):
 ```bash
 make run              # builder-api on HTTP_ADDR (default :8080)
 make run-execution    # execution-api
+make run-worker       # execution-worker
 ```
 
 After changing SQL queries or migrations:
@@ -85,16 +104,17 @@ make sqlc
 
 ## Local vs production
 
-|                | Local                                                             | Production                                                                                                   |
-| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **Compute**    | Docker Compose (`Dockerfile.local`, `Dockerfile.execution.local`) | ECS Fargate (`Dockerfile` / `Dockerfile.execution` — `linux/amd64`, distroless)                              |
-| **Database**   | `postgres:17-alpine` in Compose                                   | Amazon RDS for PostgreSQL 17                                                                                 |
-| **Config**     | `.env` from `.env.example`                                        | Task definition / secrets (see `.env.production.example`)                                                    |
-| **Migrations** | goose one-shot `migrate` service on compose up                    | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations)) |
-| **TLS to DB**  | `sslmode=disable`                                                 | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                         |
-| **Networking** | localhost ports `5432` / `8080` / `8081`                          | ALB path rules → ECS; ECS talks to RDS in the VPC                                                            |
+|                | Local                                                                                        | Production                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **Compute**    | Docker Compose (`Dockerfile.local`, `Dockerfile.execution.local`, `Dockerfile.worker.local`) | ECS Fargate (`Dockerfile` / `Dockerfile.execution` / `Dockerfile.worker` — `linux/amd64`, distroless)        |
+| **Database**   | `postgres:17-alpine` in Compose                                                              | Amazon RDS for PostgreSQL 17                                                                                 |
+| **Queue**      | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`    | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                    |
+| **Config**     | `.env` from `.env.example` (dummy AWS keys + `AWS_ENDPOINT_URL` for ElasticMQ)               | Task definition + task role (see `.env.production.example`). No dummy keys; `AWS_ENDPOINT_URL` unset         |
+| **Migrations** | goose one-shot `migrate` service on compose up                                               | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations)) |
+| **TLS to DB**  | `sslmode=disable`                                                                            | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                         |
+| **Networking** | localhost ports `5432` / `8080` / `8081` / `8082` / `9324`                                   | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS and SQS in AWS                          |
 
-Infra (ECR, ALB, ECS, RDS, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
+Infra (ECR, ALB, ECS, RDS, SQS, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 
 ## Design docs
 

@@ -13,6 +13,13 @@ module "ecr_execution_api" {
   service         = "execution-api"
 }
 
+module "ecr_execution_worker" {
+  source = "./modules/ecr"
+
+  repository_name = "orchex-execution-worker"
+  service         = "execution-api"
+}
+
 module "ecr_db_migrate" {
   source = "./modules/ecr"
 
@@ -29,8 +36,9 @@ module "alb" {
 module "sqs_node_jobs" {
   source = "./modules/sqs"
 
-  name                   = "orchex-node-jobs"
-  allowed_task_role_name = "orchex-execution-api"
+  name                    = "orchex-node-jobs"
+  producer_task_role_name = "orchex-execution-api"
+  consumer_task_role_name = "orchex-execution-worker"
 }
 
 
@@ -94,6 +102,7 @@ module "ecs_builder_api" {
   container_name = "builder-api"
   image          = "${module.ecr_builder_api.repository_url}:latest"
 
+  attach_load_balancer                = true
   target_group_arn                    = module.alb.target_groups["builder"].arn
   alb_security_group_id               = module.alb.security_group_id
   data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
@@ -108,6 +117,7 @@ module "ecs_execution_api" {
   container_name = "execution-api"
   image          = "${module.ecr_execution_api.repository_url}:latest"
 
+  attach_load_balancer                = true
   target_group_arn                    = module.alb.target_groups["execution"].arn
   alb_security_group_id               = module.alb.security_group_id
   data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
@@ -120,13 +130,38 @@ module "ecs_execution_api" {
   extra_environment = [
     { name = "SQS_QUEUE_URL", value = module.sqs_node_jobs.queue_url },
     { name = "SQS_DLQ_URL", value = module.sqs_node_jobs.dead_letter_queue_url },
+    { name = "AWS_REGION", value = var.aws_region },
   ]
   tasks_iam_role_statements = [{
     sid     = "NodeJobsQueue"
-    actions = module.sqs_node_jobs.queue_actions
+    actions = module.sqs_node_jobs.producer_queue_actions
     resources = [
       module.sqs_node_jobs.queue_arn,
       module.sqs_node_jobs.dead_letter_queue_arn,
     ]
+  }]
+}
+
+module "ecs_execution_worker" {
+  source         = "./modules/ecs_service"
+  name           = "orchex-execution-worker"
+  service        = "execution-api"
+  cluster_arn    = module.ecs.arn
+  container_name = "execution-worker"
+  image          = "${module.ecr_execution_worker.repository_url}:latest"
+
+  data_plane_client_security_group_id = module.ecs.data_plane_client_security_group_id
+  database_url_secret_arn             = module.database_url.arn
+
+  tasks_iam_role_name            = "orchex-execution-worker"
+  tasks_iam_role_use_name_prefix = false
+  extra_environment = [
+    { name = "SQS_QUEUE_URL", value = module.sqs_node_jobs.queue_url },
+    { name = "AWS_REGION", value = var.aws_region },
+  ]
+  tasks_iam_role_statements = [{
+    sid       = "NodeJobsQueueConsume"
+    actions   = module.sqs_node_jobs.consumer_queue_actions
+    resources = [module.sqs_node_jobs.queue_arn]
   }]
 }

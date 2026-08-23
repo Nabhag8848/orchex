@@ -68,22 +68,22 @@ module "this" {
     }
   }
 
-  load_balancer = {
+  load_balancer = var.attach_load_balancer ? {
     alb = {
       target_group_arn = var.target_group_arn
       container_name   = var.container_name
       container_port   = var.container_port
     }
-  }
+  } : {}
 
-  security_group_ingress_rules = {
+  security_group_ingress_rules = var.attach_load_balancer ? {
     app = {
       from_port                    = var.container_port
       to_port                      = var.container_port
       ip_protocol                  = "tcp"
       referenced_security_group_id = var.alb_security_group_id
     }
-  }
+  } : {}
 
   security_group_egress_rules = {
     all = {

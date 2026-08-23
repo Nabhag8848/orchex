@@ -3,26 +3,48 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  allowed_task_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.allowed_task_role_name}"
+  producer_task_role_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.producer_task_role_name}"
+  consumer_task_role_arn = var.consumer_task_role_name == null ? null : "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${var.consumer_task_role_name}"
 
-  # Identity + resource policies share this set. ChangeMessageVisibility is
-  # required for per-message leases (ReceiveMessage VisibilityTimeout is not enough
-  # when a node timeout exceeds the queue default).
-  queue_actions = [
+  # Queue resource policies only allow a subset of SQS actions (*Batch is IAM-only;
+  # SendMessage / DeleteMessage / ChangeMessageVisibility cover the batch APIs).
+  producer_resource_policy_actions = [
     "sqs:SendMessage",
-    "sqs:SendMessageBatch",
     "sqs:ReceiveMessage",
     "sqs:DeleteMessage",
-    "sqs:DeleteMessageBatch",
     "sqs:ChangeMessageVisibility",
-    "sqs:ChangeMessageVisibilityBatch",
     "sqs:GetQueueAttributes",
     "sqs:GetQueueUrl",
   ]
 
-  execution_api_principal = [{
+  consumer_resource_policy_actions = [
+    "sqs:ReceiveMessage",
+    "sqs:DeleteMessage",
+    "sqs:ChangeMessageVisibility",
+    "sqs:GetQueueAttributes",
+    "sqs:GetQueueUrl",
+  ]
+
+  # IAM task-role actions (IAM accepts *Batch).
+  producer_queue_actions = concat(local.producer_resource_policy_actions, [
+    "sqs:SendMessageBatch",
+    "sqs:DeleteMessageBatch",
+    "sqs:ChangeMessageVisibilityBatch",
+  ])
+
+  consumer_queue_actions = concat(local.consumer_resource_policy_actions, [
+    "sqs:DeleteMessageBatch",
+    "sqs:ChangeMessageVisibilityBatch",
+  ])
+
+  producer_principal = [{
     type        = "AWS"
-    identifiers = [local.allowed_task_role_arn]
+    identifiers = [local.producer_task_role_arn]
+  }]
+
+  consumer_principal = local.consumer_task_role_arn == null ? [] : [{
+    type        = "AWS"
+    identifiers = [local.consumer_task_role_arn]
   }]
 }
 
@@ -49,20 +71,29 @@ module "this" {
   }
 
   create_queue_policy = true
-  queue_policy_statements = {
-    execution_api = {
-      sid        = "ExecutionApiOnly"
-      actions    = local.queue_actions
-      principals = local.execution_api_principal
+  queue_policy_statements = merge(
+    {
+      execution_api = {
+        sid        = "ExecutionApiProducer"
+        actions    = local.producer_resource_policy_actions
+        principals = local.producer_principal
+      }
+    },
+    var.consumer_task_role_name == null ? {} : {
+      execution_worker = {
+        sid        = "ExecutionWorkerConsumer"
+        actions    = local.consumer_resource_policy_actions
+        principals = local.consumer_principal
+      }
     }
-  }
+  )
 
   create_dlq_queue_policy = true
   dlq_queue_policy_statements = {
     execution_api = {
-      sid        = "ExecutionApiOnly"
-      actions    = local.queue_actions
-      principals = local.execution_api_principal
+      sid        = "ExecutionApiDlq"
+      actions    = local.producer_resource_policy_actions
+      principals = local.producer_principal
     }
   }
 

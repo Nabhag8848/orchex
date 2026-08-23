@@ -1,0 +1,26 @@
+# Local/dev image: native platform (fast on Apple Silicon), alpine runtime for easier debugging.
+# Production ECS/Fargate builds continue to use ./Dockerfile.worker (linux/amd64 + distroless).
+#
+# Runtime env (DATABASE_URL, HTTP_ADDR, SQS_QUEUE_URL, …) comes from compose env_file (.env).
+# Do not bake secrets into the image.
+
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates git
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build -o /out/execution-worker ./cmd/execution-worker
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates curl
+
+COPY --from=build /out/execution-worker /execution-worker
+
+EXPOSE 8080
+
+ENTRYPOINT ["/execution-worker"]

@@ -18,6 +18,16 @@ output "ecr_execution_api" {
   }
 }
 
+output "ecr_execution_worker" {
+  description = "ECR repository for the workflow execution worker"
+  value = {
+    repository_arn         = module.ecr_execution_worker.repository_arn
+    repository_name        = module.ecr_execution_worker.repository_name
+    repository_registry_id = module.ecr_execution_worker.repository_registry_id
+    repository_url         = module.ecr_execution_worker.repository_url
+  }
+}
+
 output "ecr_db_migrate" {
   description = "ECR repository for shared database migrations (goose)"
   value = {
@@ -37,7 +47,8 @@ output "sqs_node_jobs" {
     dead_letter_queue_arn  = module.sqs_node_jobs.dead_letter_queue_arn
     dead_letter_queue_url  = module.sqs_node_jobs.dead_letter_queue_url
     dead_letter_queue_name = module.sqs_node_jobs.dead_letter_queue_name
-    allowed_task_role_arn  = module.sqs_node_jobs.allowed_task_role_arn
+    producer_task_role_arn = module.sqs_node_jobs.producer_task_role_arn
+    consumer_task_role_arn = module.sqs_node_jobs.consumer_task_role_arn
   }
 }
 
@@ -182,5 +193,36 @@ output "ecs_execution_api" {
     security_group_id             = module.ecs_execution_api.security_group_id
     infrastructure_iam_role_arn   = module.ecs_execution_api.infrastructure_iam_role_arn
     infrastructure_iam_role_name  = module.ecs_execution_api.infrastructure_iam_role_name
+  }
+}
+
+output "ecs_execution_worker" {
+  description = "ECS service for the internal execution worker (no ALB)"
+  value = {
+    id                            = module.ecs_execution_worker.id
+    name                          = module.ecs_execution_worker.name
+    iam_role_name                 = module.ecs_execution_worker.iam_role_name
+    iam_role_arn                  = module.ecs_execution_worker.iam_role_arn
+    iam_role_unique_id            = module.ecs_execution_worker.iam_role_unique_id
+    container_definitions         = module.ecs_execution_worker.container_definitions
+    task_definition_arn           = module.ecs_execution_worker.task_definition_arn
+    task_definition_revision      = module.ecs_execution_worker.task_definition_revision
+    task_definition_family        = module.ecs_execution_worker.task_definition_family
+    task_exec_iam_role_name       = module.ecs_execution_worker.task_exec_iam_role_name
+    task_exec_iam_role_arn        = module.ecs_execution_worker.task_exec_iam_role_arn
+    task_exec_iam_role_unique_id  = module.ecs_execution_worker.task_exec_iam_role_unique_id
+    tasks_iam_role_name           = module.ecs_execution_worker.tasks_iam_role_name
+    tasks_iam_role_arn            = module.ecs_execution_worker.tasks_iam_role_arn
+    tasks_iam_role_unique_id      = module.ecs_execution_worker.tasks_iam_role_unique_id
+    task_set_id                   = module.ecs_execution_worker.task_set_id
+    task_set_arn                  = module.ecs_execution_worker.task_set_arn
+    task_set_stability_status     = module.ecs_execution_worker.task_set_stability_status
+    task_set_status               = module.ecs_execution_worker.task_set_status
+    autoscaling_policies          = module.ecs_execution_worker.autoscaling_policies
+    autoscaling_scheduled_actions = module.ecs_execution_worker.autoscaling_scheduled_actions
+    security_group_arn            = module.ecs_execution_worker.security_group_arn
+    security_group_id             = module.ecs_execution_worker.security_group_id
+    infrastructure_iam_role_arn   = module.ecs_execution_worker.infrastructure_iam_role_arn
+    infrastructure_iam_role_name  = module.ecs_execution_worker.infrastructure_iam_role_name
   }
 }

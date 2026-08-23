@@ -40,6 +40,10 @@ func InternalError(msg string) error {
 	return echo.NewHTTPError(http.StatusInternalServerError, msg)
 }
 
+func ServiceUnavailable(msg string) error {
+	return echo.NewHTTPError(http.StatusServiceUnavailable, msg)
+}
+
 func BindJSON(c *echo.Context, dst any) error {
 	if err := echo.BindBody(c, dst); err != nil {
 		return BadRequest("invalid json")

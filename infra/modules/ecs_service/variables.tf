@@ -46,16 +46,30 @@ variable "desired_count" {
   default     = 1
 }
 
+variable "attach_load_balancer" {
+  type        = bool
+  description = "When true, register the service with the ALB and allow ingress from alb_security_group_id. Must be a literal so Terraform can plan security-group for_each keys."
+  default     = false
+  nullable    = false
+}
+
 variable "target_group_arn" {
   type        = string
-  description = "ALB target group ARN; ECS registers task IPs automatically"
-  nullable    = false
+  description = "ALB target group ARN; ECS registers task IPs automatically. Null for internal services (no ALB)."
+  default     = null
+  nullable    = true
 }
 
 variable "alb_security_group_id" {
   type        = string
-  description = "ALB security group allowed to reach the container port"
-  nullable    = false
+  description = "ALB security group allowed to reach the container port. Null for internal services (no ALB)."
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = (var.target_group_arn == null) == (var.alb_security_group_id == null)
+    error_message = "target_group_arn and alb_security_group_id must both be set (public API) or both be null (internal worker)."
+  }
 }
 
 variable "data_plane_client_security_group_id" {

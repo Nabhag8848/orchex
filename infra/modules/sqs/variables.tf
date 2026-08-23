@@ -10,10 +10,17 @@ variable "service" {
   default     = "shared"
 }
 
-variable "allowed_task_role_name" {
+variable "producer_task_role_name" {
   type        = string
-  description = "IAM role name allowed to use this queue (execution-api task role). Queue policies allow only this principal."
+  description = "IAM role name that may send (and manage DLQ) — execution-api task role"
   nullable    = false
+}
+
+variable "consumer_task_role_name" {
+  type        = string
+  description = "IAM role name that may receive/delete/change visibility on the source queue — worker task role"
+  default     = null
+  nullable    = true
 }
 
 variable "dlq_name" {

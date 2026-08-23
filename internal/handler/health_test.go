@@ -10,22 +10,27 @@ import (
 )
 
 func TestHealth(t *testing.T) {
-	e := echo.New()
-	e.GET("/health/builder", Health)
+	paths := []string{"/health/builder", "/health/execution", "/health/worker"}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			e := echo.New()
+			e.GET(path, Health)
 
-	req := httptest.NewRequest(http.MethodGet, "/health/builder", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-	}
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
 
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body["status"] != "ok" {
-		t.Fatalf("status = %q, want ok", body["status"])
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if body["status"] != "ok" {
+				t.Fatalf("status = %q, want ok", body["status"])
+			}
+		})
 	}
 }
