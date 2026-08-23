@@ -1,5 +1,5 @@
 # Local/dev image: native platform (fast on Apple Silicon), alpine runtime for easier debugging.
-# Production ECS/Fargate builds continue to use ./Dockerfile.execution (linux/amd64 + distroless).
+# Production ECS/Fargate builds continue to use docker/Dockerfile (linux/amd64 + distroless).
 #
 # Runtime env (DATABASE_URL, HTTP_ADDR, …) comes from compose env_file (.env).
 # Do not bake secrets into the image.
@@ -14,13 +14,13 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o /out/execution-api ./cmd/execution-api
+RUN CGO_ENABLED=0 go build -o /out/builder-api ./cmd/builder-api
 
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates curl
 
-COPY --from=build /out/execution-api /execution-api
+COPY --from=build /out/builder-api /builder-api
 
 EXPOSE 8080
 
-ENTRYPOINT ["/execution-api"]
+ENTRYPOINT ["/builder-api"]

@@ -1,5 +1,5 @@
 # Local/dev image: native platform (fast on Apple Silicon), alpine runtime for easier debugging.
-# Production ECS/Fargate builds continue to use ./Dockerfile.worker (linux/amd64 + distroless).
+# Production ECS/Fargate builds continue to use docker/Dockerfile.worker (linux/amd64 + distroless).
 #
 # Runtime env (DATABASE_URL, HTTP_ADDR, SQS_QUEUE_URL, …) comes from compose env_file (.env).
 # Do not bake secrets into the image.

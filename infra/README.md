@@ -363,14 +363,14 @@ For one-shot jobs (migrations, batch work), use **`modules/ecs_run_task`** inste
 
 ### Container images (built outside Terraform)
 
-| Dockerfile                                        | ECR repository                   | ECS consumer                            |
-| ------------------------------------------------- | -------------------------------- | --------------------------------------- |
-| [`Dockerfile`](../Dockerfile)                     | `orchex-builder-api:latest`      | `module.ecs_builder_api` (service)      |
-| [`Dockerfile.execution`](../Dockerfile.execution) | `orchex-execution-api:latest`    | `module.ecs_execution_api` (service)    |
-| [`Dockerfile.worker`](../Dockerfile.worker)       | `orchex-execution-worker:latest` | `module.ecs_execution_worker` (service) |
-| [`Dockerfile.migrate`](../Dockerfile.migrate)     | `orchex-db-migrate:latest`       | `module.ecs_db_migrate` (`run-task`)    |
+| Dockerfile                                                      | ECR repository                   | ECS consumer                            |
+| --------------------------------------------------------------- | -------------------------------- | --------------------------------------- |
+| [`docker/Dockerfile`](../docker/Dockerfile)                     | `orchex-builder-api:latest`      | `module.ecs_builder_api` (service)      |
+| [`docker/Dockerfile.execution`](../docker/Dockerfile.execution) | `orchex-execution-api:latest`    | `module.ecs_execution_api` (service)    |
+| [`docker/Dockerfile.worker`](../docker/Dockerfile.worker)       | `orchex-execution-worker:latest` | `module.ecs_execution_worker` (service) |
+| [`docker/Dockerfile.migrate`](../docker/Dockerfile.migrate)     | `orchex-db-migrate:latest`       | `module.ecs_db_migrate` (`run-task`)    |
 
-Production images pin **`linux/amd64`** and use **distroless** runtimes. Local development uses [`Dockerfile.local`](../Dockerfile.local), [`Dockerfile.execution.local`](../Dockerfile.execution.local), [`Dockerfile.worker.local`](../Dockerfile.worker.local), ElasticMQ, and Compose ([`docker-compose.yml`](../docker-compose.yml)) — not deployed by this Terraform stack.
+Production images pin **`linux/amd64`** and use **distroless** runtimes. Local development uses [`docker/Dockerfile.local`](../docker/Dockerfile.local), [`docker/Dockerfile.execution.local`](../docker/Dockerfile.execution.local), [`docker/Dockerfile.worker.local`](../docker/Dockerfile.worker.local), ElasticMQ, and Compose ([`docker-compose.yml`](../docker-compose.yml)) — not deployed by this Terraform stack.
 
 After `terraform apply`, the ALB DNS name is available via `terraform output -json alb`. RDS connection details are under `terraform output -json rds`.
 
@@ -513,7 +513,7 @@ aws ecr get-login-password --region "$REGION" --profile orchex \
   | docker login --username AWS --password-stdin "$(echo "$MIGRATE_REPO" | cut -d/ -f1)"
 
 cd ..
-docker build -f Dockerfile.migrate -t "${MIGRATE_REPO}:latest" .
+docker build -f docker/Dockerfile.migrate -t "${MIGRATE_REPO}:latest" .
 docker push "${MIGRATE_REPO}:latest"
 ```
 
@@ -574,7 +574,7 @@ aws ecr get-login-password --region "$REGION" --profile orchex \
 
 # Build from the repository root, tagged for ECR (amd64 is pinned in the Dockerfile)
 cd ..
-docker build -t "${REPO_URL}:latest" .
+docker build -f docker/Dockerfile -t "${REPO_URL}:latest" .
 
 docker push "${REPO_URL}:latest"
 ```
@@ -607,7 +607,7 @@ curl "$(cd infra && terraform output -json alb | jq -r '.dns_name')/health/build
 
 ## Deploy the execution API
 
-Same region / zsh quoting as builder. Use **`Dockerfile.execution`** (the default `Dockerfile` is builder-api).
+Same region / zsh quoting as builder. Use **`docker/Dockerfile.execution`** (`docker/Dockerfile` is builder-api).
 
 ```bash
 cd infra
@@ -621,7 +621,7 @@ aws ecr get-login-password --region "$REGION" --profile orchex \
   | docker login --username AWS --password-stdin "$(echo "$REPO_URL" | cut -d/ -f1)"
 
 cd ..
-docker build -f Dockerfile.execution -t "${REPO_URL}:latest" .
+docker build -f docker/Dockerfile.execution -t "${REPO_URL}:latest" .
 
 docker push "${REPO_URL}:latest"
 ```
@@ -656,7 +656,7 @@ Unmatched paths (for example `/`) return the listener default `404` `{"error":"n
 
 ## Deploy the execution worker
 
-Same region / zsh quoting as the APIs. Use **`Dockerfile.worker`**. The worker is **not** on the ALB; `/health/worker` is only on the task itself.
+Same region / zsh quoting as the APIs. Use **`docker/Dockerfile.worker`**. The worker is **not** on the ALB; `/health/worker` is only on the task itself.
 
 ```bash
 cd infra
@@ -670,7 +670,7 @@ aws ecr get-login-password --region "$REGION" --profile orchex \
   | docker login --username AWS --password-stdin "$(echo "$REPO_URL" | cut -d/ -f1)"
 
 cd ..
-docker build -f Dockerfile.worker -t "${REPO_URL}:latest" .
+docker build -f docker/Dockerfile.worker -t "${REPO_URL}:latest" .
 
 docker push "${REPO_URL}:latest"
 ```

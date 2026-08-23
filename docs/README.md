@@ -17,18 +17,18 @@ This document tells the story of the design as a conversation between an intervi
 
 ### At a glance
 
-| Concern      | v1 decision                                                          |
-| ------------ | -------------------------------------------------------------------- |
-| Product      | Orchex owns workflow orchestration                                   |
-| Graph        | Directed acyclic graph with typed degree rules                       |
-| Trigger      | Manual first; webhook and scheduler later                            |
-| Recovery     | Checkpoint, auto-retry transient errors, then retry the failed node  |
-| Definitions  | Mutable draft, immutable published version                           |
-| Execution    | Outbox + relay → SQS → workers; DLQ after 5 deliveries               |
-| Storage      | Amazon RDS for PostgreSQL (OLTP); ClickHouse planned for OLAP        |
-| Compute      | Amazon ECS on Fargate (APIs, relay, workers)                         |
-| Function JS  | Source in Postgres; shared Lambda sandbox (invoke with source+input) |
-| Scale target | 1M runs/day and 100 QPS burst ingestion                              |
+| Concern      | v1 decision                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| Product      | Orchex owns workflow orchestration                                                        |
+| Graph        | Directed acyclic graph with typed degree rules                                            |
+| Trigger      | Manual first; webhook and scheduler later                                                 |
+| Recovery     | Checkpoint, auto-retry transient errors, then retry the failed node                       |
+| Definitions  | Mutable draft, immutable published version                                                |
+| Execution    | Outbox + relay → SQS → workers; DLQ after 5 deliveries                                    |
+| Storage      | Amazon RDS for PostgreSQL (OLTP); ClickHouse planned for OLAP                             |
+| Compute      | Amazon ECS on Fargate (builder-api, execution-api with in-process relay, internal worker) |
+| Function JS  | Source in Postgres; shared Lambda sandbox (invoke with source+input)                      |
+| Scale target | 1M runs/day and 100 QPS burst ingestion                                                   |
 
 ### Contents
 
@@ -1882,10 +1882,10 @@ Postgres still owns durable truth (versioned `nodes` / `edges` rows). The adjace
 ```text
 Client → ALB → Builder / Execution → RDS
                       │
-                      └─ relay → SQS → Workers
+                      └─ relay (in execution-api) → SQS → Workers (no ALB)
 ```
 
-APIs scale on ALB load; workers on SQS backlog; relay/DLQ watcher stay at a small fixed replica count. ~60k concurrent runs ≠ 60k tasks — workers are I/O-bound and one replica can hold many in-flight jobs.
+APIs scale on ALB load; workers on SQS backlog. The **relay is a loop inside execution-api**, not a fourth ECS service. A dedicated DLQ watcher is later. ~60k concurrent runs ≠ 60k tasks — workers are I/O-bound and one replica can hold many in-flight jobs.
 
 ### The four options
 
@@ -1906,7 +1906,7 @@ APIs scale on ALB load; workers on SQS backlog; relay/DLQ watcher stay at a smal
 3. **EC2 under ECS** remains a later cost escape hatch (same services, different capacity).
 4. **EKS** only if the org already mandates Kubernetes.
 
-**The decision: Amazon ECS on Fargate** for Builder, Execution, relay, DLQ watcher, and workers — same region as RDS and SQS.
+**The decision: Amazon ECS on Fargate** for builder-api, execution-api (relay in-process), and execution-worker — same region as RDS and SQS. The worker is internal (no ALB). DLQ watcher is not a service yet.
 
 ## 10. Deep-Dive Design: Function Isolation
 

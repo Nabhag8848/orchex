@@ -57,5 +57,4 @@ Thumbs.db
 logs
 docker-compose.override.yml
 docker-compose.yml
-Dockerfile.local
-Dockerfile.migrate
+docker/Dockerfile*

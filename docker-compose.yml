@@ -21,7 +21,7 @@ services:
   migrate:
     build:
       context: .
-      dockerfile: Dockerfile.migrate
+      dockerfile: docker/Dockerfile.migrate
     env_file:
       - .env
     environment:
@@ -34,7 +34,7 @@ services:
   builder-api:
     build:
       context: .
-      dockerfile: Dockerfile.local
+      dockerfile: docker/Dockerfile.local
     env_file:
       - .env
     environment:
@@ -54,7 +54,7 @@ services:
   execution-api:
     build:
       context: .
-      dockerfile: Dockerfile.execution.local
+      dockerfile: docker/Dockerfile.execution.local
     env_file:
       - .env
     environment:
@@ -82,7 +82,7 @@ services:
   execution-worker:
     build:
       context: .
-      dockerfile: Dockerfile.worker.local
+      dockerfile: docker/Dockerfile.worker.local
     env_file:
       - .env
     environment:
