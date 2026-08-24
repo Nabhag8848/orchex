@@ -5,6 +5,7 @@ Terraform for AWS resources. Provisions:
 - **ECR** — `orchex-builder-api`, `orchex-execution-api`, `orchex-execution-worker`, and `orchex-db-migrate` (goose migrations)
 - **ECS Fargate** — shared cluster, builder and execution **API services** (behind ALB), internal **execution-worker** (no ALB), and migrate **run-task** definition
 - **SQS** — standard queue `orchex-node-jobs` plus DLQ (14-day retention, DLQ after 5 receives)
+- **Lambda** — shared zip function `orchex-function-sandbox` (Node.js); only the execution worker may `Invoke`. Terraform zips [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src).
 - **Secrets Manager** — shared `orchex/DATABASE_URL` (Postgres URL for ECS tasks)
 - **RDS PostgreSQL 17** — `orchex-postgres` (private, master password in Secrets Manager)
 - **ALB** — HTTP :80 with path rules to builder and execution on `:8080`; unmatched paths return 404. The worker is not on the ALB.
@@ -18,7 +19,7 @@ infra/
   terraform.tf      # required Terraform / provider versions
   providers.tf      # AWS provider (region, profile, default tags)
   variables.tf      # shared variables (region, environment)
-  main.tf           # root modules (ECR, ALB, ECS, ECS services, SQS, migrate task, RDS, secrets)
+  main.tf           # root modules (ECR, ALB, ECS, ECS services, SQS, Lambda sandbox, migrate task, RDS, secrets)
   outputs.tf        # root outputs
   modules/
     ecr/            # ECR repository for container images
@@ -27,6 +28,7 @@ infra/
     ecs_service/    # Fargate service (optional ALB attachment)
     ecs_run_task/   # one-shot Fargate task definition (migrations via run-task)
     sqs/            # node-jobs queue + DLQ + resource policies
+    lambda_sandbox/ # shared Function-node JS sandbox (zip + src/index.js)
     secrets_manager/# Secrets Manager secret + version
     rds/            # PostgreSQL RDS (subnet group, SG, instance)
 ```
@@ -44,6 +46,7 @@ infra/
 | `rds`                  | RDS PostgreSQL 17                       | Application database                           |
 | `database_url`         | Secrets Manager `orchex/DATABASE_URL`   | Shared Postgres URL for ECS tasks              |
 | `sqs_node_jobs`        | SQS queue + DLQ + policies              | Node-job queue (API produces, worker consumes) |
+| `function_sandbox`     | Lambda `orchex-function-sandbox`        | Shared JS sandbox; worker Invoke only          |
 | `ecs_db_migrate`       | ECS task definition only                | One-shot `aws ecs run-task` migrations         |
 | `ecs_builder_api`      | ECS service + task definition           | Long-running builder API behind ALB            |
 | `ecs_execution_api`    | ECS service + task definition           | Long-running execution API behind ALB          |
@@ -99,19 +102,19 @@ terraform apply -var='environment=staging'
 
 All resources receive provider default tags plus module-level tags:
 
-| Tag           | Source            | Example values                                                                      |
-| ------------- | ----------------- | ----------------------------------------------------------------------------------- |
-| `Project`     | provider default  | `orchex`                                                                            |
-| `Environment` | `var.environment` | `production`                                                                        |
-| `Service`     | per module        | `builder-api`, `execution-api`, `shared`                                            |
-| `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `ecs-run-task`, `sqs`, `rds`, `secrets-manager` |
-| `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`                                             |
+| Tag           | Source            | Example values                                                                                |
+| ------------- | ----------------- | --------------------------------------------------------------------------------------------- |
+| `Project`     | provider default  | `orchex`                                                                                      |
+| `Environment` | `var.environment` | `production`                                                                                  |
+| `Service`     | per module        | `builder-api`, `execution-api`, `shared`                                                      |
+| `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `ecs-run-task`, `sqs`, `lambda`, `rds`, `secrets-manager` |
+| `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`                                                       |
 
 App-specific resources use `Service = builder-api` or `Service = execution-api`. The worker is tagged `Service = execution-api`. Shared infrastructure (ALB, ECS cluster, RDS, SQS, migrate ECR/task, app secret) uses `Service = shared`.
 
 ## Infrastructure architecture
 
-Root `main.tf` composes the modules above. Public traffic flows from the ALB to Fargate **API** tasks. The **worker** is internal (no ALB). Tasks reach RDS over the VPC using a shared **`data_plane_client`** security group. Execution-api and the worker talk to SQS with the task role (no static AWS keys). Database credentials reach tasks via the shared **`orchex/DATABASE_URL`** secret (not the RDS master secret).
+Root `main.tf` composes the modules above. Public traffic flows from the ALB to Fargate **API** tasks. The **worker** is internal (no ALB). Tasks reach RDS over the VPC using a shared **`data_plane_client`** security group. Execution-api and the worker talk to SQS with the task role (no static AWS keys). The worker may `Invoke` the shared Function sandbox Lambda; the Lambda is not in a VPC (outbound internet). Database credentials reach tasks via the shared **`orchex/DATABASE_URL`** secret (not the RDS master secret).
 
 ### Runtime architecture
 
@@ -143,6 +146,10 @@ flowchart TB
     DLQ["orchex-node-jobs-dlq"]
   end
 
+  subgraph lam["modules/lambda_sandbox"]
+    SB["orchex-function-sandbox<br/>zip · nodejs24.x"]
+  end
+
   subgraph sm["Secrets Manager"]
     APPURL["orchex/DATABASE_URL"]
   end
@@ -168,6 +175,7 @@ flowchart TB
   MIG -->|:5432| RDS
   EX -->|SendMessage| Q
   WRK -->|Receive / Delete| Q
+  WRK -->|Invoke| SB
   Q -->|after 5 receives| DLQ
   SG -.- API
   SG -.- EX
@@ -208,7 +216,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  A["terraform apply"] --> B["docker push<br/>orchex-db-migrate"]
+  A["terraform apply<br/>(incl. zip sandbox Lambda)"] --> B["docker push<br/>orchex-db-migrate"]
   B --> C["aws ecs run-task<br/>goose up"]
   C --> D["docker push<br/>orchex-builder-api"]
   D --> E["docker push<br/>orchex-execution-api"]
@@ -229,6 +237,7 @@ See [Lifecycle](#lifecycle) for commands.
 | `SQS_QUEUE_URL`                                        | Task definition env               | Execution API (relay) and worker                                               |
 | `SQS_DLQ_URL`                                          | Task definition env               | Execution API                                                                  |
 | `AWS_REGION`                                           | Task definition env               | Execution API and worker (real SQS; do **not** set `AWS_ENDPOINT_URL` in prod) |
+| `FUNCTION_SANDBOX_ARN`                                 | Task definition env               | Worker (sync `Invoke` of `orchex-function-sandbox`)                            |
 
 ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATABASE_URL` via `task_exec_secret_arns`. Tasks do **not** read the RDS master secret at runtime.
 
@@ -269,14 +278,14 @@ ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATA
 - Runs Fargate **services** on the shared cluster (`desired_count = 1`): `orchex-builder-api`, `orchex-execution-api`, and `orchex-execution-worker`.
 - Pulls images from **ECR** (`…:latest`).
 - **Secrets**: injects `DATABASE_URL` from `var.database_url_secret_arn`; grants the task execution role access via `task_exec_secret_arns`.
-- **Environment**: `HTTP_ADDR=:8080` (each task has its own ENI). Execution-api and worker also get `SQS_QUEUE_URL` and `AWS_REGION` (API also `SQS_DLQ_URL`).
+- **Environment**: `HTTP_ADDR=:8080` (each task has its own ENI). Execution-api and worker also get `SQS_QUEUE_URL` and `AWS_REGION` (API also `SQS_DLQ_URL`; worker also `FUNCTION_SANDBOX_ARN`).
 - **Load balancer**: `attach_load_balancer` must be a **literal** `true`/`false` (not derived from a computed ALB ID). Terraform cannot plan `for_each` on security-group ingress rules if the map itself is unknown until apply.
   - APIs: `attach_load_balancer = true` plus `target_group_arn` and `alb_security_group_id`.
   - Worker: leave `attach_load_balancer = false` (default); no target group, no ALB ingress.
 - **Networking**: tasks get a public IP in default VPC subnets. Each task ENI has two security groups:
   - **Service SG** — for APIs, ingress on `:8080` only from the **ALB security group**; for the worker, no ALB ingress
   - **`data_plane_client` SG** — required client identity for RDS access (`data_plane_client_security_group_id` from `module.ecs`).
-- Execution-api task role name is pinned `orchex-execution-api`; worker `orchex-execution-worker` (`tasks_iam_role_use_name_prefix = false`) so SQS resource policies can allow those ARNs without a Terraform cycle.
+- Execution-api task role name is pinned `orchex-execution-api`; worker `orchex-execution-worker` (`tasks_iam_role_use_name_prefix = false`) so SQS queue policies and the Lambda resource policy can allow those ARNs without a Terraform cycle. The worker task role also gets `lambda:InvokeFunction` on the sandbox ARN.
 - Tagged with `Service = builder-api` or `Service = execution-api` and `Component = ecs-service`.
 - Container runs with a read-only root filesystem (distroless image).
 
@@ -289,6 +298,18 @@ ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATA
   - Producer (`orchex-execution-api`): send/receive/delete/visibility/get on the source queue **and** the DLQ
   - Consumer (`orchex-execution-worker`): receive/delete/visibility/get on the **source queue only** (no `SendMessage`, no DLQ)
 - IAM task-role statements use the module outputs `producer_queue_actions` / `consumer_queue_actions` (includes `*Batch`).
+
+### `modules/lambda_sandbox`
+
+- Wraps [terraform-aws-modules/lambda/aws](https://registry.terraform.io/modules/terraform-aws-modules/lambda/aws) v8.1.2.
+- One zip function **`orchex-function-sandbox`**: `nodejs24.x`, handler `index.handler`, source [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src). Terraform zips that directory on apply (no manual zip, no ECR, **`store_on_s3` off**). AWS stores the deployment package in Lambda-managed storage — not an S3 bucket in this account. Local zip artifacts land in `infra/builds/` (gitignored; module default `artifacts_dir`).
+- **Invoke contract (sync):** workers call `Invoke` with `{ source, input, timeout_ms }`. User Function `source` is data (Postgres at run time), not files in the zip. The zip is only our sandbox. `index.js` validates **runtime `input`** (`{ data: object }` only); it does not re-check draft config (`source` / `timeout_ms`).
+- **Timeout 300s** (Function node `timeout_ms` max is 300000). **128 MB**. **x86_64**. **`publish = false`** (no versions; invoke `$LATEST`).
+- **Not in a VPC** — the sandbox can reach the public internet.
+- CloudWatch Logs retention **7 days**. Lambda execution role is **logs only**.
+- **Invoke ACL** (same dual-IAM pattern as SQS): resource policy allows only the pinned **`orchex-execution-worker`** role; that role’s identity policy has `lambda:InvokeFunction` on this function. Execution-api cannot invoke. Same-account IAM admins with `lambda:InvokeFunction` on `*` can still invoke; that is not gated by this resource policy.
+- `recursive_loop = Terminate`. No Function URL, layers, EFS, reserved/provisioned concurrency, or async event config / Lambda DLQ.
+- Tagged `Service = execution-api`, `Component = lambda`.
 
 ### `modules/ecs_run_task`
 
@@ -335,6 +356,10 @@ module "sqs_node_jobs" {
   consumer_task_role_name = "orchex-execution-worker"
 }
 
+module "function_sandbox" {
+  invoker_task_role_name = "orchex-execution-worker"
+}
+
 module "ecs_builder_api" {
   attach_load_balancer = true
   target_group_arn     = module.alb.target_groups["builder"].arn
@@ -348,7 +373,7 @@ module "ecs_execution_api" {
 
 module "ecs_execution_worker" {
   # attach_load_balancer defaults to false
-  extra_environment = [SQS_QUEUE_URL, AWS_REGION]
+  extra_environment = [SQS_QUEUE_URL, AWS_REGION, FUNCTION_SANDBOX_ARN]
 }
 ```
 
@@ -370,7 +395,7 @@ For one-shot jobs (migrations, batch work), use **`modules/ecs_run_task`** inste
 | [`docker/Dockerfile.worker`](../docker/Dockerfile.worker)       | `orchex-execution-worker:latest` | `module.ecs_execution_worker` (service) |
 | [`docker/Dockerfile.migrate`](../docker/Dockerfile.migrate)     | `orchex-db-migrate:latest`       | `module.ecs_db_migrate` (`run-task`)    |
 
-Production images pin **`linux/amd64`** and use **distroless** runtimes. Local development uses [`docker/Dockerfile.local`](../docker/Dockerfile.local), [`docker/Dockerfile.execution.local`](../docker/Dockerfile.execution.local), [`docker/Dockerfile.worker.local`](../docker/Dockerfile.worker.local), ElasticMQ, and Compose ([`docker-compose.yml`](../docker-compose.yml)) — not deployed by this Terraform stack.
+Production images pin **`linux/amd64`** and use **distroless** runtimes. The Function sandbox is **not** a container — Terraform zips [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src) during apply. Local development uses [`docker/Dockerfile.local`](../docker/Dockerfile.local), [`docker/Dockerfile.execution.local`](../docker/Dockerfile.execution.local), [`docker/Dockerfile.worker.local`](../docker/Dockerfile.worker.local), ElasticMQ, and Compose ([`docker-compose.yml`](../docker-compose.yml)) — not deployed by this Terraform stack. Compose workers skip the sandbox (`FUNCTION_SANDBOX_ARN` unset and/or `AWS_ENDPOINT_URL` set).
 
 After `terraform apply`, the ALB DNS name is available via `terraform output -json alb`. RDS connection details are under `terraform output -json rds`.
 
@@ -398,7 +423,7 @@ aws sts get-caller-identity --profile orchex
 
 ## Create infrastructure
 
-Provisions ECR repos, ECS cluster, RDS, SQS, Secrets Manager (`orchex/DATABASE_URL`), ALB, builder/execution API services, the internal worker, and the migrate task definition.
+Provisions ECR repos, ECS cluster, RDS, SQS, the Function sandbox Lambda, Secrets Manager (`orchex/DATABASE_URL`), ALB, builder/execution API services, the internal worker, and the migrate task definition.
 
 ```bash
 cd infra
@@ -411,11 +436,11 @@ terraform apply
 
 **Incremental apply** (optional — Terraform handles dependencies):
 
-| Phase | What                                          | `-target` (optional)                                                                                                      |
-| ----- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| A     | Cluster + RDS + app secret + migrate task def | `module.ecs`, `module.rds`, `module.database_url`, `module.ecs_db_migrate`, `module.ecr_db_migrate`                       |
-| B     | Migrations                                    | [Run database migrations](#run-database-migrations) (not Terraform)                                                       |
-| C     | ALB + SQS + API + worker services             | `module.alb`, `module.sqs_node_jobs`, `module.ecs_builder_api`, `module.ecs_execution_api`, `module.ecs_execution_worker` |
+| Phase | What                                          | `-target` (optional)                                                                                                                                 |
+| ----- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A     | Cluster + RDS + app secret + migrate task def | `module.ecs`, `module.rds`, `module.database_url`, `module.ecs_db_migrate`, `module.ecr_db_migrate`                                                  |
+| B     | Migrations                                    | [Run database migrations](#run-database-migrations) (not Terraform)                                                                                  |
+| C     | ALB + SQS + Lambda + API + worker services    | `module.alb`, `module.sqs_node_jobs`, `module.function_sandbox`, `module.ecs_builder_api`, `module.ecs_execution_api`, `module.ecs_execution_worker` |
 
 For most cases, a single **`terraform apply`** is enough.
 
@@ -427,6 +452,7 @@ terraform output -json ecr_builder_api
 terraform output -json ecr_execution_api
 terraform output -json ecr_execution_worker
 terraform output -json sqs_node_jobs
+terraform output -json function_sandbox
 terraform output -json alb | jq -r '.dns_name'
 terraform output -json rds | jq
 ```
@@ -438,6 +464,7 @@ terraform output -json rds | jq
 | `ecr_execution_worker` | Execution worker ECR repository URL, name, ARN                  |
 | `ecr_db_migrate`       | Shared goose migration image repository                         |
 | `sqs_node_jobs`        | Queue / DLQ URLs and ARNs, producer and consumer role ARNs      |
+| `function_sandbox`     | Sandbox Lambda name / ARN, log group, invoker role ARN          |
 | `alb`                  | ALB DNS name, target groups, listener rules, security groups    |
 | `ecs`                  | Shared Fargate cluster ARN / name, `data_plane_client` SG       |
 | `ecs_db_migrate`       | Migrate task definition + `run_task_network_configuration`      |
@@ -695,7 +722,31 @@ aws ecs update-service \
   --profile orchex
 ```
 
-The worker is not on the ALB. To exercise SQS in AWS, send a message then check worker CloudWatch logs:
+The worker is not on the ALB. After apply, `FUNCTION_SANDBOX_ARN` is on the task. The worker process **connects to RDS first**; if Postgres is unreachable it never Invokes. With the current worker image, startup then sync-Invokes the sandbox once (`internal/sandbox` ping: `return { ping: true }` and `input: { data: {} }`). Watch the task’s CloudWatch logs:
+
+- `sandbox: invoke ok payload=...` — task role can Invoke and the handler ran
+- `sandbox: invoke failed: ...` — IAM, timeout, or runtime error (`AccessDeniedException` is the worker-ACL case)
+- `sandbox: skip invoke (local)` — `FUNCTION_SANDBOX_ARN` empty or `AWS_ENDPOINT_URL` set (Compose)
+
+Push **`docker/Dockerfile.worker`** after the ping code landed, then force a new deployment; an old `:latest` image will not log those lines.
+
+Optional: confirm the zip/handler without the worker (your IAM user, not the task role):
+
+```bash
+FN=$(cd infra && terraform output -json function_sandbox | jq -r '.function_name')
+
+aws lambda invoke \
+  --function-name "$FN" \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"source":"return { ping: true };","input":{"data":{}},"timeout_ms":5000}' \
+  --region ap-south-1 \
+  --profile orchex \
+  /tmp/orchex-sandbox-out.json
+
+cat /tmp/orchex-sandbox-out.json
+```
+
+To exercise SQS in AWS, send a message then check worker CloudWatch logs:
 
 ```bash
 QUEUE_URL=$(cd infra && terraform output -json sqs_node_jobs | jq -r '.queue_url')
@@ -734,7 +785,7 @@ After destroy, `terraform.tfstate` no longer tracks those resources. Run `terraf
 
 Use this when you want to tear down **compute, networking, database, and secrets**, but **keep** the ECR repos and the images already pushed (`:latest` tags survive until lifecycle rules expire old tags).
 
-**Destroyed:** ALB, ECS cluster, builder / execution / worker services, migrate task definition, SQS queues, RDS, `orchex/DATABASE_URL` secret, related IAM roles and security groups.
+**Destroyed:** ALB, ECS cluster, builder / execution / worker services, migrate task definition, SQS queues, Function sandbox Lambda, RDS, `orchex/DATABASE_URL` secret, related IAM roles and security groups.
 
 **Kept in AWS:** `module.ecr_builder_api`, `module.ecr_execution_api`, `module.ecr_execution_worker`, `module.ecr_db_migrate` (repos + images).
 
@@ -747,6 +798,7 @@ terraform destroy \
   -target=module.ecs_execution_worker \
   -target=module.ecs_db_migrate \
   -target=module.sqs_node_jobs \
+  -target=module.function_sandbox \
   -target=module.database_url \
   -target=module.rds \
   -target=module.alb \

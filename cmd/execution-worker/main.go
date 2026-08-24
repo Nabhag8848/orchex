@@ -12,6 +12,7 @@ import (
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/queue"
+	"github.com/nabhag8848/orchex/internal/sandbox"
 	"github.com/nabhag8848/orchex/internal/worker"
 )
 
@@ -29,6 +30,24 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer pool.Close()
+
+	if cfg.FunctionSandboxARN == "" || cfg.AWSEndpointURL != "" {
+		log.Printf("sandbox: skip invoke (local)")
+	} else {
+		sb, err := sandbox.New(ctx, cfg.FunctionSandboxARN, cfg.AWSRegion, cfg.AWSEndpointURL)
+		if err != nil {
+			log.Printf("sandbox: client: %v", err)
+		} else {
+			pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			out, err := sb.Ping(pctx)
+			cancel()
+			if err != nil {
+				log.Printf("sandbox: invoke failed: %v", err)
+			} else {
+				log.Printf("sandbox: invoke ok payload=%s", out)
+			}
+		}
+	}
 
 	if cfg.SQSQueueURL == "" {
 		log.Printf("sqs: SQS_QUEUE_URL unset; skip polling (local)")

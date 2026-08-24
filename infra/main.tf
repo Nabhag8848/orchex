@@ -41,6 +41,13 @@ module "sqs_node_jobs" {
   consumer_task_role_name = "orchex-execution-worker"
 }
 
+module "function_sandbox" {
+  source = "./modules/lambda_sandbox"
+
+  name                   = "orchex-function-sandbox"
+  invoker_task_role_name = "orchex-execution-worker"
+  service                = "execution-api"
+}
 
 module "ecs" {
   source = "./modules/ecs"
@@ -158,10 +165,18 @@ module "ecs_execution_worker" {
   extra_environment = [
     { name = "SQS_QUEUE_URL", value = module.sqs_node_jobs.queue_url },
     { name = "AWS_REGION", value = var.aws_region },
+    { name = "FUNCTION_SANDBOX_ARN", value = module.function_sandbox.lambda_function_arn },
   ]
-  tasks_iam_role_statements = [{
-    sid       = "NodeJobsQueueConsume"
-    actions   = module.sqs_node_jobs.consumer_queue_actions
-    resources = [module.sqs_node_jobs.queue_arn]
-  }]
+  tasks_iam_role_statements = [
+    {
+      sid       = "NodeJobsQueueConsume"
+      actions   = module.sqs_node_jobs.consumer_queue_actions
+      resources = [module.sqs_node_jobs.queue_arn]
+    },
+    {
+      sid       = "FunctionSandboxInvoke"
+      actions   = module.function_sandbox.invoke_actions
+      resources = [module.function_sandbox.lambda_function_arn]
+    },
+  ]
 }

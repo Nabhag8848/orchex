@@ -3,8 +3,8 @@ package main
 import "fmt"
 
 type Graph struct {
-	adj map[string]map[string]struct{} // adjacency list
-	inDegrees map[string]int
+	adj        map[string]map[string]struct{} // adjacency list
+	inDegrees  map[string]int
 	outDegrees map[string]int
 }
 
@@ -14,7 +14,7 @@ func (g *Graph) AddNode(node string) {
 	}
 }
 
-func (g *Graph) AddDirectedEdge(node1, node2 string) { 
+func (g *Graph) AddDirectedEdge(node1, node2 string) {
 	g.AddNode(node1)
 	g.AddNode(node2)
 	if _, ok := g.adj[node1][node2]; ok {
@@ -29,13 +29,13 @@ func (g *Graph) AddDirectedEdge(node1, node2 string) {
 
 func NewGraph() *Graph {
 	return &Graph{
-		adj: map[string]map[string]struct{}{},
+		adj:        map[string]map[string]struct{}{},
 		outDegrees: map[string]int{},
-		inDegrees: map[string]int{},
+		inDegrees:  map[string]int{},
 	}
 }
 
-func (g *Graph) Nodes() []string { 
+func (g *Graph) Nodes() []string {
 	nodes := make([]string, 0, len(g.adj))
 	for node := range g.adj {
 		nodes = append(nodes, node)
@@ -43,7 +43,7 @@ func (g *Graph) Nodes() []string {
 	return nodes
 }
 
-func (g *Graph) Edges() []string { 
+func (g *Graph) Edges() []string {
 	result := make([]string, 0, len(g.adj))
 
 	for node, edges := range g.adj {
@@ -54,23 +54,22 @@ func (g *Graph) Edges() []string {
 	return result
 }
 
-func (g *Graph) hasDirectedEdge(node1, node2 string) bool { 
+func (g *Graph) hasDirectedEdge(node1, node2 string) bool {
 	_, ok := g.adj[node1][node2]
 	return ok
 }
 
-func (g *Graph) PrintGraph() { 
+func (g *Graph) PrintGraph() {
 	for node, edges := range g.adj {
 		fmt.Printf("%s -> %v\n", node, edges)
 	}
 }
 
-
-func (g *Graph) outDegree(node string) int { 
+func (g *Graph) outDegree(node string) int {
 	return len(g.adj[node])
 }
 
-func (g *Graph) inDegree(node string) int { 
+func (g *Graph) inDegree(node string) int {
 	count := 0
 	for _, edges := range g.adj {
 		if _, ok := edges[node]; ok {
@@ -106,7 +105,7 @@ func (g *Graph) BFS(start, target string) bool {
 }
 
 func (g *Graph) DFS(start, target string) bool {
-    // iterative DFS
+	// iterative DFS
 	visited := map[string]bool{start: true}
 	stack := []string{start}
 
@@ -127,7 +126,7 @@ func (g *Graph) DFS(start, target string) bool {
 				neighbors = append(neighbors, v)
 			}
 		}
-		
+
 		for i := len(neighbors) - 1; i >= 0; i-- {
 			stack = append(stack, neighbors[i])
 		}

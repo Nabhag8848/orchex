@@ -38,6 +38,20 @@ output "ecr_db_migrate" {
   }
 }
 
+output "function_sandbox" {
+  description = "Shared Function-node JS sandbox Lambda (workers Invoke only)"
+  value = {
+    function_arn          = module.function_sandbox.lambda_function_arn
+    function_name         = module.function_sandbox.lambda_function_name
+    invoke_arn            = module.function_sandbox.lambda_function_invoke_arn
+    role_arn              = module.function_sandbox.lambda_role_arn
+    role_name             = module.function_sandbox.lambda_role_name
+    log_group_name        = module.function_sandbox.lambda_cloudwatch_log_group_name
+    log_group_arn         = module.function_sandbox.lambda_cloudwatch_log_group_arn
+    invoker_task_role_arn = module.function_sandbox.invoker_task_role_arn
+  }
+}
+
 output "sqs_node_jobs" {
   description = "SQS standard queue for node jobs plus attached DLQ"
   value = {

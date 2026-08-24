@@ -106,17 +106,18 @@ make sqlc
 
 ## Local vs production
 
-|                | Local                                                                                                             | Production                                                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Compute**    | Docker Compose (`docker/Dockerfile.local`, `docker/Dockerfile.execution.local`, `docker/Dockerfile.worker.local`) | ECS Fargate (`docker/Dockerfile` / `docker/Dockerfile.execution` / `docker/Dockerfile.worker` — `linux/amd64`, distroless) |
-| **Database**   | `postgres:17-alpine` in Compose                                                                                   | Amazon RDS for PostgreSQL 17                                                                                               |
-| **Queue**      | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                         | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
-| **Config**     | `.env` from `.env.example` (dummy AWS keys + `AWS_ENDPOINT_URL` for ElasticMQ)                                    | Terraform task definition + task role ([infra/](./infra/)). No dummy keys; `AWS_ENDPOINT_URL` unset                        |
-| **Migrations** | goose one-shot `migrate` service on compose up                                                                    | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
-| **TLS to DB**  | `sslmode=disable`                                                                                                 | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
-| **Networking** | localhost ports `5432` / `8080` / `8081` / `8082` / `9324`                                                        | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS and SQS in AWS                                        |
+|                 | Local                                                                                                             | Production                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Compute**     | Docker Compose (`docker/Dockerfile.local`, `docker/Dockerfile.execution.local`, `docker/Dockerfile.worker.local`) | ECS Fargate (`docker/Dockerfile` / `docker/Dockerfile.execution` / `docker/Dockerfile.worker` — `linux/amd64`, distroless) |
+| **Database**    | `postgres:17-alpine` in Compose                                                                                   | Amazon RDS for PostgreSQL 17                                                                                               |
+| **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                         | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
+| **Function JS** | No sandbox Lambda; worker logs `sandbox: skip invoke (local)`                                                     | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN`)                  |
+| **Config**      | `.env` from `.env.example` (dummy AWS keys + `AWS_ENDPOINT_URL` for ElasticMQ)                                    | Terraform task definition + task role ([infra/](./infra/)). No dummy keys; `AWS_ENDPOINT_URL` unset                        |
+| **Migrations**  | goose one-shot `migrate` service on compose up                                                                    | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
+| **TLS to DB**   | `sslmode=disable`                                                                                                 | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
+| **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324`                                                        | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS and SQS in AWS                                        |
 
-Infra (ECR, ALB, ECS, RDS, SQS, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
+Infra (ECR, ALB, ECS, RDS, SQS, Lambda sandbox, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 
 ## Design docs
 

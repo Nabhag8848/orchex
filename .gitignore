@@ -10,6 +10,7 @@
 /bin/
 /dist/
 /build/
+/infra/builds/
 /tmp/
 
 # Coverage / profiling
