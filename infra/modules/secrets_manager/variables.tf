@@ -23,3 +23,10 @@ variable "description" {
   default     = null
   nullable    = true
 }
+
+variable "recovery_window_in_days" {
+  type        = number
+  description = "Days AWS keeps a deleted secret before the name can be reused. 0 deletes immediately."
+  default     = 0
+  nullable    = false
+}

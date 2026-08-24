@@ -327,6 +327,7 @@ ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATA
 - Wraps [terraform-aws-modules/secrets-manager/aws](https://registry.terraform.io/modules/terraform-aws-modules/secrets-manager/aws) v2.1.0.
 - Generic wrapper: creates a Secrets Manager secret + version from `var.secret_string`.
 - Root **`module.database_url`** stores the composed Postgres URL at **`orchex/DATABASE_URL`** (`Service = shared`).
+- **`recovery_window_in_days`** (default **0**) — destroy removes the secret immediately so apply can reuse the same name. Override on the module if you want a recovery window.
 - Secret value is built in root `main.tf` from the RDS master secret + RDS endpoint metadata + `sslmode=require`.
 - **Note:** the composed URL exists in Terraform state; re-apply after RDS password rotation to refresh it.
 
