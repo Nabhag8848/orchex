@@ -54,7 +54,6 @@ plan.out
 .env
 .env.*
 !.env.example
-!.env.production.example
 *.pem
 *.key
 credentials.json
