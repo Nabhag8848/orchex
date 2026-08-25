@@ -292,20 +292,20 @@ The API uses UTC ISO-8601 timestamps. IDs are UUIDs in storage; readable IDs bel
 
 ### Endpoint index
 
-| Method   | Path                              | Purpose                              | Success |
-| -------- | --------------------------------- | ------------------------------------ | ------- |
-| `POST`   | `/v1/workflows`                   | Create workflow and empty draft v1   | `201`   |
-| `GET`    | `/v1/workflows`                   | List non-archived workflow summaries | `200`   |
-| `GET`    | `/v1/workflows/:id`               | Retrieve latest or published graph   | `200`   |
-| `PUT`    | `/v1/workflows/:id`               | Replace the editable graph           | `200`   |
-| `POST`   | `/v1/workflows/:id/publish`       | Validate and publish the head        | `200`   |
-| `DELETE` | `/v1/workflows/:id`               | Archive a workflow                   | `204`   |
-| `POST`   | `/v1/workflows/:workflow_id/runs` | Start a run                          | `201`   |
-| `GET`    | `/v1/runs/:run_id`                | Retrieve a run snapshot              | `200`   |
-| `POST`   | `/v1/runs/:run_id/pause`          | Soft-pause a run                     | `200`   |
-| `POST`   | `/v1/runs/:run_id/resume`         | Resume a paused run                  | `200`   |
-| `POST`   | `/v1/runs/:run_id/stop`           | Cancel a run                         | `200`   |
-| `POST`   | `/v1/runs/:run_id/retry`          | Retry the failed node                | `200`   |
+| Method   | Path                        | Purpose                              | Success |
+| -------- | --------------------------- | ------------------------------------ | ------- |
+| `POST`   | `/v1/workflows`             | Create workflow and empty draft v1   | `201`   |
+| `GET`    | `/v1/workflows`             | List non-archived workflow summaries | `200`   |
+| `GET`    | `/v1/workflows/:id`         | Retrieve latest or published graph   | `200`   |
+| `PUT`    | `/v1/workflows/:id`         | Replace the editable graph           | `200`   |
+| `POST`   | `/v1/workflows/:id/publish` | Validate and publish the head        | `200`   |
+| `DELETE` | `/v1/workflows/:id`         | Archive a workflow                   | `204`   |
+| `POST`   | `/v1/runs`                  | Start a run                          | `201`   |
+| `GET`    | `/v1/runs/:run_id`          | Retrieve a run snapshot              | `200`   |
+| `POST`   | `/v1/runs/:run_id/pause`    | Soft-pause a run                     | `200`   |
+| `POST`   | `/v1/runs/:run_id/resume`   | Resume a paused run                  | `200`   |
+| `POST`   | `/v1/runs/:run_id/stop`     | Cancel a run                         | `200`   |
+| `POST`   | `/v1/runs/:run_id/retry`    | Retry the failed node                | `200`   |
 
 ### Shared shapes
 
@@ -666,10 +666,10 @@ The response is `204 No Content`. This is a soft delete: status becomes `archive
 **Candidate:** Start pins the latest published version and creates a `pending` run at that version's Start node. Publish already guarantees exactly one Start and full reachability from it, so the run can resolve `current_node_id` without an extra graph check.
 
 ```http
-POST /v1/workflows/:workflow_id/runs
+POST /v1/runs
 ```
 
-Request body: `{ "payload": <object | array | string | number | boolean | null> }`. That value becomes Start’s output `{ "data": { "payload": ... } }` and is stored on the run as `last_output`. Start has no graph predecessor (`input_schema` is empty); the next node reads `last_output` as `input.data`.
+Request body: `{ "workflow_id": "<uuid>", "payload": <object | array | string | number | boolean | null> }`. That value becomes Start’s output `{ "data": { "payload": ... } }` and is stored on the run as `last_output`. Start has no graph predecessor (`input_schema` is empty); the next node reads `last_output` as `input.data`.
 
 The server pins the workflow's `latest_published_version_id`, finds that version's Start node, stores it as `current_node_id`, writes `last_output` from the request payload, and returns `201 Created` with a complete Run in `pending`.
 

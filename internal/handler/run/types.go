@@ -9,7 +9,8 @@ import (
 )
 
 type StartRunRequest struct {
-	Payload json.RawMessage `json:"payload" validate:"required"`
+	WorkflowID uuid.UUID       `json:"workflow_id" validate:"required"`
+	Payload    json.RawMessage `json:"payload" validate:"required"`
 }
 
 type Run struct {
