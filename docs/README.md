@@ -675,6 +675,44 @@ The server pins the workflow's `latest_published_version_id`, finds that version
 
 A workflow that is missing, archived, still a draft, or has never been published returns `404`. Concurrent runs are allowed. Start-run idempotency is not defined yet.
 
+**Example request and response**
+
+**Request**
+
+```json
+{
+  "workflow_id": "wf_01",
+  "payload": { "order_id": "1" }
+}
+```
+
+**Response** (`201 Created`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "pending",
+  "trigger_type": "manual",
+  "current_node_id": "node_start",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": null,
+  "paused_at": null,
+  "cancelled_at": null,
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:00:00Z"
+}
+```
+
 #### Retrieve a run
 
 **Interviewer:** Can terminal runs still be inspected?
@@ -686,6 +724,33 @@ GET /v1/runs/:run_id
 ```
 
 The response is `200 OK` with the complete Run snapshot. Runs remain readable in every state, including `completed`, `failed`, and `cancelled`. An unknown run returns `404`.
+
+**Example response** (`200 OK`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "running",
+  "trigger_type": "manual",
+  "current_node_id": "node_api",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": "2026-07-17T08:00:01Z",
+  "paused_at": null,
+  "cancelled_at": null,
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:00:01Z"
+}
+```
 
 #### Pause
 
@@ -707,6 +772,33 @@ Pause is soft. If a worker is already executing a node, it finishes that node an
 
 The `200 OK` response is the complete updated Run with `paused_at` set.
 
+**Example response** (`200 OK`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "paused",
+  "trigger_type": "manual",
+  "current_node_id": "node_api",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": "2026-07-17T08:00:01Z",
+  "paused_at": "2026-07-17T08:01:00Z",
+  "cancelled_at": null,
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:01:00Z"
+}
+```
+
 #### Resume
 
 **Interviewer:** Where does a paused run continue?
@@ -724,6 +816,33 @@ Request body: `{}`.
 - every other state returns `409`.
 
 A failed run uses Retry, not Resume.
+
+**Example response** (`200 OK`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "running",
+  "trigger_type": "manual",
+  "current_node_id": "node_api",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": "2026-07-17T08:00:01Z",
+  "paused_at": null,
+  "cancelled_at": null,
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:02:00Z"
+}
+```
 
 #### Stop
 
@@ -743,6 +862,33 @@ Request body: `{}`.
 
 The response is the updated Run with `cancelled_at` set. Cancelled is terminal: it cannot be resumed or retried. Stop remains available even if the parent workflow has since been archived.
 
+**Example response** (`200 OK`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "cancelled",
+  "trigger_type": "manual",
+  "current_node_id": "node_api",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": "2026-07-17T08:00:01Z",
+  "paused_at": null,
+  "cancelled_at": "2026-07-17T08:03:00Z",
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:03:00Z"
+}
+```
+
 #### Retry
 
 **Interviewer:** Does retry create a new run or replay the graph?
@@ -760,6 +906,33 @@ Request body: `{}`.
 - every other state returns `409`.
 
 Retry clears `error` and re-executes `current_node_id` in the same run. We do not create a second run and we do not replay successful nodes.
+
+**Example response** (`200 OK`)
+
+```json
+{
+  "id": "run_01",
+  "workflow_id": "wf_01",
+  "workflow_version_id": "ver_01",
+  "status": "running",
+  "trigger_type": "manual",
+  "current_node_id": "node_api",
+  "current_node_attempt": 1,
+  "last_output": {
+    "data": {
+      "payload": { "order_id": "1" }
+    }
+  },
+  "error": null,
+  "started_at": "2026-07-17T08:00:01Z",
+  "paused_at": null,
+  "cancelled_at": null,
+  "completed_at": null,
+  "failed_at": null,
+  "created_at": "2026-07-17T08:00:00Z",
+  "updated_at": "2026-07-17T08:04:00Z"
+}
+```
 
 ```mermaid
 stateDiagram-v2

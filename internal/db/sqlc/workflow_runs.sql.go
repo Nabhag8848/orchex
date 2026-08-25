@@ -46,6 +46,36 @@ func (q *Queries) GetPublishedWorkflowForStart(ctx context.Context, id uuid.UUID
 	return i, err
 }
 
+const getWorkflowRun = `-- name: GetWorkflowRun :one
+SELECT id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
+FROM workflow_runs
+WHERE id = $1
+`
+
+func (q *Queries) GetWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, getWorkflowRun, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Status,
+		&i.TriggerType,
+		&i.CurrentNodeID,
+		&i.CurrentNodeAttempt,
+		&i.LastOutput,
+		&i.Error,
+		&i.StartedAt,
+		&i.PausedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertRunNodeJobOutbox = `-- name: InsertRunNodeJobOutbox :exec
 INSERT INTO run_node_jobs_outbox (
     run_id,

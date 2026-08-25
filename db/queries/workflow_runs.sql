@@ -1,3 +1,8 @@
+-- name: GetWorkflowRun :one
+SELECT *
+FROM workflow_runs
+WHERE id = $1;
+
 -- Published workflow plus that version's Start node.
 -- LEFT JOIN keeps a published row when Start is missing so the handler can 500
 -- instead of treating it as an unpublished 404.

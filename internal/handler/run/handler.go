@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v5"
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/handler"
@@ -19,6 +21,7 @@ func New(store *db.Store) *Handler {
 
 func (h *Handler) Register(g *echo.Group) {
 	g.POST("", h.Start)
+	g.GET("/:id", h.Get)
 }
 
 func (h *Handler) Start(c *echo.Context) error {
@@ -47,4 +50,28 @@ func (h *Handler) Start(c *echo.Context) error {
 		return handler.MapQueryError(req.WorkflowID, err, "failed to start workflow")
 	}
 	return c.JSON(http.StatusCreated, run)
+}
+
+func (h *Handler) Get(c *echo.Context) error {
+	id, err := parseID(c)
+	if err != nil {
+		return err
+	}
+
+	row, err := h.store.GetWorkflowRun(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return handler.RunNotFound(id)
+		}
+		return handler.InternalError("failed to get run")
+	}
+	return c.JSON(http.StatusOK, runFromRow(row))
+}
+
+func parseID(c *echo.Context) (uuid.UUID, error) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return uuid.Nil, handler.BadRequest("invalid run id")
+	}
+	return id, nil
 }
