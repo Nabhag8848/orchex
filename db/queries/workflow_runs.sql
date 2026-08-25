@@ -50,15 +50,3 @@ INSERT INTO run_node_jobs_outbox (
     sqlc.arg('node_id'),
     1
 );
-
--- name: ListRunNodeJobsOutboxByRun :many
-SELECT
-    id,
-    run_id,
-    workflow_version_id,
-    node_id,
-    attempt,
-    available_at,
-    created_at
-FROM run_node_jobs_outbox
-WHERE run_id = $1;
