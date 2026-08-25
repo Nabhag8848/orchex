@@ -100,6 +100,95 @@ func (ns NullNodeCategory) Value() (driver.Value, error) {
 	return string(ns.NodeCategory), nil
 }
 
+type TriggerType string
+
+const (
+	TriggerTypeManual    TriggerType = "manual"
+	TriggerTypeWebhook   TriggerType = "webhook"
+	TriggerTypeScheduler TriggerType = "scheduler"
+)
+
+func (e *TriggerType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TriggerType(s)
+	case string:
+		*e = TriggerType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TriggerType: %T", src)
+	}
+	return nil
+}
+
+type NullTriggerType struct {
+	TriggerType TriggerType `json:"trigger_type"`
+	Valid       bool        `json:"valid"` // Valid is true if TriggerType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTriggerType) Scan(value interface{}) error {
+	if value == nil {
+		ns.TriggerType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TriggerType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTriggerType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TriggerType), nil
+}
+
+type WorkflowRunStatus string
+
+const (
+	WorkflowRunStatusPending   WorkflowRunStatus = "pending"
+	WorkflowRunStatusRunning   WorkflowRunStatus = "running"
+	WorkflowRunStatusPaused    WorkflowRunStatus = "paused"
+	WorkflowRunStatusFailed    WorkflowRunStatus = "failed"
+	WorkflowRunStatusCompleted WorkflowRunStatus = "completed"
+	WorkflowRunStatusCancelled WorkflowRunStatus = "cancelled"
+)
+
+func (e *WorkflowRunStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = WorkflowRunStatus(s)
+	case string:
+		*e = WorkflowRunStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for WorkflowRunStatus: %T", src)
+	}
+	return nil
+}
+
+type NullWorkflowRunStatus struct {
+	WorkflowRunStatus WorkflowRunStatus `json:"workflow_run_status"`
+	Valid             bool              `json:"valid"` // Valid is true if WorkflowRunStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullWorkflowRunStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.WorkflowRunStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.WorkflowRunStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullWorkflowRunStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.WorkflowRunStatus), nil
+}
+
 type WorkflowStatus string
 
 const (
@@ -172,6 +261,16 @@ type NodeType struct {
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
 
+type RunNodeJobsOutbox struct {
+	ID                uuid.UUID  `json:"id"`
+	RunID             uuid.UUID  `json:"run_id"`
+	WorkflowVersionID uuid.UUID  `json:"workflow_version_id"`
+	NodeID            uuid.UUID  `json:"node_id"`
+	Attempt           int32      `json:"attempt"`
+	AvailableAt       *time.Time `json:"available_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+}
+
 type Workflow struct {
 	ID                       uuid.UUID      `json:"id"`
 	Name                     string         `json:"name"`
@@ -192,6 +291,25 @@ type WorkflowEdge struct {
 	Label             EdgeLabel `json:"label"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+type WorkflowRun struct {
+	ID                 uuid.UUID         `json:"id"`
+	WorkflowID         uuid.UUID         `json:"workflow_id"`
+	WorkflowVersionID  uuid.UUID         `json:"workflow_version_id"`
+	Status             WorkflowRunStatus `json:"status"`
+	TriggerType        TriggerType       `json:"trigger_type"`
+	CurrentNodeID      uuid.UUID         `json:"current_node_id"`
+	CurrentNodeAttempt int32             `json:"current_node_attempt"`
+	LastOutput         json.RawMessage   `json:"last_output"`
+	Error              *json.RawMessage  `json:"error"`
+	StartedAt          *time.Time        `json:"started_at"`
+	PausedAt           *time.Time        `json:"paused_at"`
+	CancelledAt        *time.Time        `json:"cancelled_at"`
+	CompletedAt        *time.Time        `json:"completed_at"`
+	FailedAt           *time.Time        `json:"failed_at"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
 }
 
 type WorkflowVersion struct {

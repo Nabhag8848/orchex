@@ -202,6 +202,7 @@ Table workflow_runs {
   trigger_type trigger_type [not null, default: 'manual']
   current_node_id uuid [not null, note: 'Checkpoint. Set to start node on create; never NULL']
   current_node_attempt int [not null, default: 1, note: 'Attempts on the current node. Reset to 1 on checkpoint advance and on manual Retry; incremented by auto-retry']
+  last_output jsonb [not null, default: '{}', note: 'Single hop envelope { data: ... }. On create: Start output from the run-start payload ({ data: { payload } }). Overwritten only when a node succeeds, in the same transaction as the checkpoint advance — while current_node_id is in flight this is the predecessor output (that node input). Failure leaves it unchanged for Retry. After Response, this is the workflow result.']
   error jsonb [note: 'NULL when healthy. Last failure: { node_id, error: <node error_schema payload> }. Also holds the transient error between auto-retry attempts. Cleared on retry/success (not on pause-Resume).']
   started_at timestamptz [note: 'NULL while pending; set when execution begins']
   paused_at timestamptz [note: 'NULL unless status=paused']
@@ -217,7 +218,8 @@ Table workflow_runs {
 
   Note: '''
     One execution of a published workflow version.
-    Resume-from-failure uses current_node_id + error.
+    Resume-from-failure uses current_node_id + last_output + error.
+    last_output is the previous node's output only (not a map of every hop).
     current_node_id FK is composite with workflow_version_id → nodes.
     error wraps the failing node's error_schema payload with node_id for run-level context.
     Historical logs/traces belong in ClickHouse later — this column is operational state only.
