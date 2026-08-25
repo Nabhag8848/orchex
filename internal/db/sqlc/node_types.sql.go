@@ -7,18 +7,20 @@ package sqlcdb
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
 
 const listNodeTypes = `-- name: ListNodeTypes :many
-SELECT id, type
+SELECT id, type, config_schema
 FROM node_types
 `
 
 type ListNodeTypesRow struct {
-	ID   uuid.UUID `json:"id"`
-	Type string    `json:"type"`
+	ID           uuid.UUID       `json:"id"`
+	Type         string          `json:"type"`
+	ConfigSchema json.RawMessage `json:"config_schema"`
 }
 
 func (q *Queries) ListNodeTypes(ctx context.Context) ([]ListNodeTypesRow, error) {
@@ -30,7 +32,7 @@ func (q *Queries) ListNodeTypes(ctx context.Context) ([]ListNodeTypesRow, error)
 	items := []ListNodeTypesRow{}
 	for rows.Next() {
 		var i ListNodeTypesRow
-		if err := rows.Scan(&i.ID, &i.Type); err != nil {
+		if err := rows.Scan(&i.ID, &i.Type, &i.ConfigSchema); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

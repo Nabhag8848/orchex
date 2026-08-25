@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -125,6 +126,57 @@ func TestUpdateWorkflowSoftValidation(t *testing.T) {
 	code, raw := te.do(http.MethodPut, "/v1/workflows/"+created.ID.String(), incompleteGraph("Soft Save"))
 	if code != http.StatusOK {
 		t.Fatalf("incomplete draft should save; status=%d body=%s", code, raw)
+	}
+}
+
+func TestUpdateWorkflowConfigValidation(t *testing.T) {
+	te := setup(t)
+	created := te.create("Bad Config", "x")
+
+	start, api, resp := uuid.New(), uuid.New(), uuid.New()
+	e1, e2 := uuid.New(), uuid.New()
+	payload := map[string]any{
+		"name": "Bad Config",
+		"nodes": []map[string]any{
+			{"id": start, "node_type": "start", "name": "Start", "config": map[string]any{}},
+			{"id": api, "node_type": "api", "name": "Call API", "config": map[string]any{}},
+			{"id": resp, "node_type": "response", "name": "Done", "config": map[string]any{"status_code": 200}},
+		},
+		"edges": []map[string]any{
+			{"id": e1, "from_node_id": start, "to_node_id": api, "label": "default"},
+			{"id": e2, "from_node_id": api, "to_node_id": resp, "label": "default"},
+		},
+	}
+
+	code, raw := te.do(http.MethodPut, "/v1/workflows/"+created.ID.String(), payload)
+	if code != http.StatusBadRequest {
+		t.Fatalf("invalid api config should 400; status=%d body=%s", code, raw)
+	}
+	if msg := errMessage(t, raw); !contains(msg, "config_schema") {
+		t.Fatalf("error=%q", msg)
+	}
+
+	code, raw = te.do(http.MethodPut, "/v1/workflows/"+created.ID.String(), linearGraph("Bad Config", "ok"))
+	if code != http.StatusOK {
+		t.Fatalf("valid config should save; status=%d body=%s", code, raw)
+	}
+	detail := decode[WorkflowDetail](t, raw)
+	var apiNode *Node
+	for i := range detail.Graph.Nodes {
+		if detail.Graph.Nodes[i].NodeType == "api" {
+			apiNode = &detail.Graph.Nodes[i]
+			break
+		}
+	}
+	if apiNode == nil {
+		t.Fatal("missing api node")
+	}
+	var cfg map[string]any
+	if err := json.Unmarshal(apiNode.Config, &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg["method"] != "GET" || cfg["url"] != "https://example.com/health" {
+		t.Fatalf("config not persisted: %v", cfg)
 	}
 }
 

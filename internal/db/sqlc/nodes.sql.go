@@ -36,6 +36,7 @@ const listNodesForPublish = `-- name: ListNodesForPublish :many
 SELECT
     n.id,
     nt.type,
+    n.config,
     nt.min_in_degree,
     nt.max_in_degree,
     nt.min_out_degree,
@@ -46,12 +47,13 @@ WHERE n.workflow_version_id = $1
 `
 
 type ListNodesForPublishRow struct {
-	ID           uuid.UUID `json:"id"`
-	Type         string    `json:"type"`
-	MinInDegree  int32     `json:"min_in_degree"`
-	MaxInDegree  int32     `json:"max_in_degree"`
-	MinOutDegree int32     `json:"min_out_degree"`
-	MaxOutDegree int32     `json:"max_out_degree"`
+	ID           uuid.UUID       `json:"id"`
+	Type         string          `json:"type"`
+	Config       json.RawMessage `json:"config"`
+	MinInDegree  int32           `json:"min_in_degree"`
+	MaxInDegree  int32           `json:"max_in_degree"`
+	MinOutDegree int32           `json:"min_out_degree"`
+	MaxOutDegree int32           `json:"max_out_degree"`
 }
 
 // PK prefix (workflow_version_id, id); join node_types by PK for degree bounds.
@@ -67,6 +69,7 @@ func (q *Queries) ListNodesForPublish(ctx context.Context, workflowVersionID uui
 		if err := rows.Scan(
 			&i.ID,
 			&i.Type,
+			&i.Config,
 			&i.MinInDegree,
 			&i.MaxInDegree,
 			&i.MinOutDegree,
@@ -97,7 +100,7 @@ SELECT
     $1,
     (e->>'node_type_id')::uuid,
     e->>'name',
-    '{}'::jsonb,
+    COALESCE(e->'config', '{}'::jsonb),
     NULLIF(e->>'position_x', '')::double precision,
     NULLIF(e->>'position_y', '')::double precision
 FROM jsonb_array_elements($2::jsonb) AS t(e)

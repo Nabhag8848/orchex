@@ -12,6 +12,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/labstack/echo/v5 v5.3.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 )
 
 require (

@@ -76,11 +76,20 @@ Dummy AWS keys in `.env` (`test` / `test`) are enough for ElasticMQ.
 
 Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`), and the worker with `WORKER_HTTP_PORT` (default `8082`).
 
-Workflows live in the `public.workflows` table. Example:
+Workflows live in the `public.workflows` table. Seed local samples that hit **public APIs** (httpbin, Open-Meteo, JSONPlaceholder) and use **all five node types** on every non-empty graph:
 
 ```bash
-curl http://localhost:8080/v1/workflows/<uuid>
+make seed-local
 ```
+
+Then:
+
+```bash
+curl -sS http://localhost:8080/v1/workflows | jq '.items[] | {id, name, status}'
+curl -sS http://localhost:8080/v1/workflows/<uuid> | jq '.graph.nodes[] | {name, node_type, config}'
+```
+
+The script prints more builder curls after seeding.
 
 ### Optional: API on the host
 

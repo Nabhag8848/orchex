@@ -45,6 +45,15 @@ func (h *Handler) publish(ctx context.Context, id uuid.UUID) (PublishWorkflowRes
 		if err != nil {
 			return err
 		}
+		types, err := loadNodeTypes(ctx, q)
+		if err != nil {
+			return err
+		}
+		for _, row := range nodeRows {
+			if err := types.validateConfig(row.ID, row.Type, row.Config); err != nil {
+				return invalidGraph("%s", err.Error())
+			}
+		}
 		if err := validatePublishGraph(toPublishNodes(nodeRows), toPublishEdges(edgeRows)); err != nil {
 			return err
 		}

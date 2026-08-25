@@ -529,16 +529,17 @@ This is a complete replacement, not a patch. Node and edge IDs are client-genera
 }
 ```
 
-Saving performs soft validation:
+Saving performs soft graph validation plus strict config validation:
 
 - every `node_type` is known;
 - every edge endpoint exists in the submitted graph;
 - node and edge IDs are unique within the version;
 - node `name` values are unique within the version;
 - at most one outgoing edge per `(from_node_id, label)`;
-- `label` is `default`, `true`, or `false`.
+- `label` is `default`, `true`, or `false`;
+- each node's `config` validates against that type's `config_schema` (JSON Schema 2020-12, including format assertions such as `uri-template`).
 
-Config schema validation is deferred: every node is persisted with `config: {}`. An incomplete graph is allowed here. Same-version edge integrity is also enforced by composite foreign keys in Postgres.
+An incomplete graph (missing edges, unreachable nodes) is still allowed on save. Same-version edge integrity is also enforced by composite foreign keys in Postgres.
 
 Versioning uses the two pointers on `workflows`:
 
@@ -574,7 +575,10 @@ If the head is a draft, the server updates it in place. If the head is already p
         "id": "node_api",
         "node_type": "api",
         "name": "Create user",
-        "config": {},
+        "config": {
+          "method": "POST",
+          "url": "https://api.example.com/users"
+        },
         "position": { "x": 280, "y": 80 }
       }
     ],
@@ -611,9 +615,10 @@ Publish performs hard validation, in order:
 - every node satisfies its type’s in-degree and out-degree bounds;
 - Conditional outgoing edges are labeled `true` and `false`; all other outgoing edges use `default`;
 - the graph is a DAG (no cycles; Kahn peel);
-- every node is reachable from Start.
+- every node is reachable from Start;
+- each node's stored `config` still matches that type's `config_schema` (re-checked so a published graph cannot carry invalid settings).
 
-Config validity remains deferred (nodes still persist `config: {}` on save). Edge endpoints and unique IDs remain soft-validation concerns from Update. Same-version edge integrity comes from the database foreign keys.
+Edge endpoints and unique IDs remain soft-validation concerns from Update. Same-version edge integrity comes from the database foreign keys.
 
 The response is `200 OK` with workflow metadata (no graph body — the client already has what it published):
 
@@ -1069,7 +1074,7 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 - client-generated logical ID;
 - node type reference;
 - unique name within the version (deferred unique, so swaps in one save are allowed);
-- JSON config (persisted as `{}` until config-schema validation lands);
+- JSON config validated against `node_types.config_schema` on save and publish;
 - optional canvas coordinates;
 - timestamps.
 
@@ -2165,7 +2170,6 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - a standard HTTP error response body;
 - one consistent archived-resource status (`404` or `410`);
 - optimistic concurrency on Update (`expected_latest_version_id` / `409`);
-- config-schema validation on save and publish (nodes currently persist `config: {}`);
 - narrowing General API `output_schema.status` to 2xx if we want the schema itself to forbid non-2xx success shapes;
 - external idempotency keys, so a tight duplicate race cannot fire the same side effect twice;
 - pause/stop races for long-running nodes;

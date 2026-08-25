@@ -13,7 +13,7 @@ SELECT
     sqlc.arg('workflow_version_id'),
     (e->>'node_type_id')::uuid,
     e->>'name',
-    '{}'::jsonb,
+    COALESCE(e->'config', '{}'::jsonb),
     NULLIF(e->>'position_x', '')::double precision,
     NULLIF(e->>'position_y', '')::double precision
 FROM jsonb_array_elements(sqlc.arg('nodes')::jsonb) AS t(e)
@@ -29,6 +29,7 @@ ON CONFLICT (workflow_version_id, id) DO UPDATE SET
 SELECT
     n.id,
     nt.type,
+    n.config,
     nt.min_in_degree,
     nt.max_in_degree,
     nt.min_out_degree,

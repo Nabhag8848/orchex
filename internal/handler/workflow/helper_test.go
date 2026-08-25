@@ -129,8 +129,13 @@ func linearGraph(name, desc string) map[string]any {
 		"description": desc,
 		"nodes": []map[string]any{
 			{"id": start, "node_type": "start", "name": "Start", "config": map[string]any{}},
-			{"id": api, "node_type": "api", "name": "Call API", "config": map[string]any{}},
-			{"id": resp, "node_type": "response", "name": "Done", "config": map[string]any{}},
+			{"id": api, "node_type": "api", "name": "Call API", "config": map[string]any{
+				"method": "GET",
+				"url":    "https://example.com/health",
+			}},
+			{"id": resp, "node_type": "response", "name": "Done", "config": map[string]any{
+				"status_code": 200,
+			}},
 		},
 		"edges": []map[string]any{
 			{"id": e1, "from_node_id": start, "to_node_id": api, "label": "default"},
@@ -146,8 +151,13 @@ func incompleteGraph(name string) map[string]any {
 		"name": name,
 		"nodes": []map[string]any{
 			{"id": start, "node_type": "start", "name": "Start", "config": map[string]any{}},
-			{"id": api, "node_type": "api", "name": "Call API", "config": map[string]any{}},
-			{"id": resp, "node_type": "response", "name": "Done", "config": map[string]any{}},
+			{"id": api, "node_type": "api", "name": "Call API", "config": map[string]any{
+				"method": "GET",
+				"url":    "https://example.com/health",
+			}},
+			{"id": resp, "node_type": "response", "name": "Done", "config": map[string]any{
+				"status_code": 200,
+			}},
 		},
 		"edges": []map[string]any{
 			{"id": e1, "from_node_id": start, "to_node_id": api, "label": "default"},

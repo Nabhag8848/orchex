@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,11 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	sqlcdb "github.com/nabhag8848/orchex/internal/db/sqlc"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type nodeTypes struct {
-	idByName map[string]uuid.UUID
-	names    []string
+	idByName     map[string]uuid.UUID
+	schemaByName map[string]*jsonschema.Schema
+	names        []string
 }
 
 func loadNodeTypes(ctx context.Context, q *sqlcdb.Queries) (nodeTypes, error) {
@@ -21,15 +24,44 @@ func loadNodeTypes(ctx context.Context, q *sqlcdb.Queries) (nodeTypes, error) {
 		return nodeTypes{}, err
 	}
 
+	compiler := jsonschema.NewCompiler()
+	compiler.DefaultDraft(jsonschema.Draft2020)
+	compiler.AssertFormat()
+
 	nt := nodeTypes{
-		idByName: make(map[string]uuid.UUID, len(rows)),
-		names:    make([]string, 0, len(rows)),
+		idByName:     make(map[string]uuid.UUID, len(rows)),
+		schemaByName: make(map[string]*jsonschema.Schema, len(rows)),
+		names:        make([]string, 0, len(rows)),
 	}
 	for _, row := range rows {
+		sch, err := compileConfigSchema(compiler, row.Type, row.ConfigSchema)
+		if err != nil {
+			return nodeTypes{}, err
+		}
 		nt.idByName[row.Type] = row.ID
+		nt.schemaByName[row.Type] = sch
 		nt.names = append(nt.names, row.Type)
 	}
 	return nt, nil
+}
+
+func compileConfigSchema(compiler *jsonschema.Compiler, typeName string, raw json.RawMessage) (*jsonschema.Schema, error) {
+	if len(raw) == 0 {
+		raw = json.RawMessage(`{}`)
+	}
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse config_schema for %q: %w", typeName, err)
+	}
+	url := "orchex://node-types/" + typeName + "/config"
+	if err := compiler.AddResource(url, doc); err != nil {
+		return nil, fmt.Errorf("add config_schema for %q: %w", typeName, err)
+	}
+	sch, err := compiler.Compile(url)
+	if err != nil {
+		return nil, fmt.Errorf("compile config_schema for %q: %w", typeName, err)
+	}
+	return sch, nil
 }
 
 func (nt nodeTypes) id(name string) (uuid.UUID, bool) {
@@ -39,6 +71,24 @@ func (nt nodeTypes) id(name string) (uuid.UUID, bool) {
 
 func (nt nodeTypes) known() string {
 	return strings.Join(nt.names, ", ")
+}
+
+func (nt nodeTypes) validateConfig(nodeID uuid.UUID, nodeType string, config json.RawMessage) error {
+	sch, ok := nt.schemaByName[nodeType]
+	if !ok {
+		return fmt.Errorf("node %s has unknown node_type %q. Use one of: %s", nodeID, nodeType, nt.known())
+	}
+	if len(config) == 0 {
+		config = json.RawMessage(`{}`)
+	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(config))
+	if err != nil {
+		return fmt.Errorf("node %s (%s): config is not valid JSON: %v", nodeID, nodeType, err)
+	}
+	if err := sch.Validate(inst); err != nil {
+		return fmt.Errorf("node %s (%s): config does not match config_schema: %v", nodeID, nodeType, err)
+	}
+	return nil
 }
 
 func validateGraph(nodes []Node, edges []Edge, types nodeTypes) error {
@@ -72,6 +122,9 @@ func uniqueNodes(nodes []Node, types nodeTypes) (map[uuid.UUID]struct{}, error) 
 
 		if _, ok := types.id(n.NodeType); !ok {
 			return nil, fmt.Errorf("node %s has unknown node_type %q. Use one of: %s", n.ID, n.NodeType, types.known())
+		}
+		if err := types.validateConfig(n.ID, n.NodeType, n.Config); err != nil {
+			return nil, err
 		}
 	}
 	return ids, nil

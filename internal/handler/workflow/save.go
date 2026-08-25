@@ -92,11 +92,12 @@ func persistGraph(ctx context.Context, q *sqlcdb.Queries, versionID uuid.UUID, n
 }
 
 type nodeRecord struct {
-	ID         uuid.UUID `json:"id"`
-	NodeTypeID uuid.UUID `json:"node_type_id"`
-	Name       string    `json:"name"`
-	PositionX  *float64  `json:"position_x"`
-	PositionY  *float64  `json:"position_y"`
+	ID         uuid.UUID       `json:"id"`
+	NodeTypeID uuid.UUID       `json:"node_type_id"`
+	Name       string          `json:"name"`
+	Config     json.RawMessage `json:"config"`
+	PositionX  *float64        `json:"position_x"`
+	PositionY  *float64        `json:"position_y"`
 }
 
 type edgeRecord struct {
@@ -114,10 +115,15 @@ func encodeNodes(nodes []Node, types nodeTypes) (json.RawMessage, error) {
 			return nil, fmt.Errorf("unknown node_type %q", n.NodeType)
 		}
 		x, y := n.coords()
+		config := n.Config
+		if len(config) == 0 {
+			config = json.RawMessage(`{}`)
+		}
 		rows = append(rows, nodeRecord{
 			ID:         n.ID,
 			NodeTypeID: typeID,
 			Name:       n.Name,
+			Config:     config,
 			PositionX:  x,
 			PositionY:  y,
 		})
