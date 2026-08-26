@@ -22,6 +22,7 @@ func New(store *db.Store) *Handler {
 func (h *Handler) Register(g *echo.Group) {
 	g.POST("", h.Start)
 	g.GET("/:id", h.Get)
+	g.POST("/:id/pause", h.Pause)
 }
 
 func (h *Handler) Start(c *echo.Context) error {

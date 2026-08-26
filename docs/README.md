@@ -170,7 +170,7 @@ stateDiagram-v2
 
 **Interviewer:** Can a running workflow be controlled?
 
-**Candidate:** Yes. A run can be paused, resumed, stopped, or retried, subject to its current state. Pause is soft: an in-flight node finishes, but its successor is not scheduled. Stop moves the run to terminal `cancelled`. Retry is only for `failed` runs and continues from `current_node_id`.
+**Candidate:** Yes. A run can be paused, resumed, stopped, or retried, subject to its current state. Pause is soft and v1's pause API only flips run status when the run is `pending` or `running` — it does not interrupt a worker mid-node. An in-flight node may still finish (and can even land `completed` if it was the last hop); jobs still sitting in the outbox or SQS respect `paused` and do not continue. Stop moves the run to terminal `cancelled`. Retry is only for `failed` runs and continues from `current_node_id`. Details and the accepted edge cases live under [Pause](#pause).
 
 ### What do we expose for observability?
 
@@ -756,7 +756,7 @@ The response is `200 OK` with the complete Run snapshot. Runs remain readable in
 
 **Interviewer:** What does pause mean if a node is already running?
 
-**Candidate:** It is a soft pause: finish the in-flight node, checkpoint it, and do not schedule the successor.
+**Candidate:** Soft pause. The pause endpoint itself only checks status and flips the run to `paused` — it does not kill a worker or cancel an SQS message. What happens next depends on whether a worker is already executing the current node.
 
 ```http
 POST /v1/runs/:run_id/pause
@@ -764,13 +764,29 @@ POST /v1/runs/:run_id/pause
 
 Request body: `{}`.
 
-Pause is soft. If a worker is already executing a node, it finishes that node and checkpoints it, but does not enqueue the successor.
+**What the endpoint does (v1):**
 
-- `pending` or `running` becomes `paused`;
+- allow only `pending` or `running`;
+- set `status = paused` and `paused_at = now()`;
 - already `paused` is an idempotent `200`;
 - `completed`, `failed`, or `cancelled` returns `409`.
 
-The `200 OK` response is the complete updated Run with `paused_at` set.
+No outbox delete, no SQS purge, no worker interrupt in the API handler. Soft pause is enforced later by workers and the relay reading run status before continuing.
+
+**Soft-pause semantics (accepted tradeoff):**
+
+| Where the current node job is                                                                                     | After `POST …/pause`                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Worker is executing it now** (including the last node before completion)                                        | That in-flight hop **finishes**. The worker still checkpoints. If the hop produces a next outbox row, later paths must not schedule a successor while `paused`. If it was the **last** node and success means the run is done, the worker/relay path may still move the run to **`completed`** — pause "wins" in the API response for a moment, then completion supersedes it. |
+| **Not executing** — row still in the outbox (relay has not pushed), or message waiting in SQS, or not yet claimed | Pause **sticks**. Relay and workers see `paused` and do not deliver / do not execute further hops for that run until Resume.                                                                                                                                                                                                                                                   |
+
+So: pause is reliable for work that has not started on a worker; it is **best-effort** against an already-running node. The rare race — last node in flight when the client pauses — can end in `completed` rather than staying `paused`. That is deliberate for v1: status flip is cheap and correct enough; preempting an in-flight executor is not.
+
+**Interviewer:** Why not hard-cancel the in-flight node?
+
+**Candidate:** Hard interrupt needs cooperative cancellation in every executor (API, Function sandbox, …), lease/visibility gymnastics on SQS, and clear rules for partial side effects. Soft pause keeps the execution spine simple: checkpoint + outbox stay the source of truth; pause is a status gate on "schedule or run the next hop," not a distributed abort.
+
+The `200 OK` response is the complete updated Run with `paused_at` set (status `paused` at response time — see the race above if a last hop is already executing).
 
 **Example response** (`200 OK`)
 
@@ -2323,7 +2339,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 
 **Candidate:** No. The execution spine, the queue product, the OLTP database product, the graph data-structure model, the control-plane compute product (ECS on Fargate), and Function isolation (Postgres source + shared Lambda sandbox) are settled; these are next:
 
-- pause/stop races and long-running node interruption;
+- pause/stop: soft pause is settled in [Pause](#pause) (status flip only; in-flight last hop may still complete); hard interrupt of long-running nodes remains open;
 - ClickHouse event, trace, retention, and correlation schemas;
 - sandbox hardening details (timeouts, memory, network policy, error envelope mapping) beyond the isolation product choice;
 - authorization, tenancy, quotas, and data isolation;
@@ -2345,7 +2361,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - optimistic concurrency on Update (`expected_latest_version_id` / `409`);
 - narrowing General API `output_schema.status` to 2xx if we want the schema itself to forbid non-2xx success shapes;
 - external idempotency keys, so a tight duplicate race cannot fire the same side effect twice;
-- pause/stop races for long-running nodes;
+- hard interrupt / preemption of long-running in-flight nodes (soft pause tradeoff is documented under Pause);
 - ClickHouse event and trace schemas;
 - performance indexes based on production queries;
 - transactional rollback;

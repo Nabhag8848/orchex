@@ -233,6 +233,12 @@ Table workflow_runs {
     Workers advance state with guarded (conditional) updates on
     (current_node_id, current_node_attempt) so duplicate queue deliveries lose the race
     and drop out instead of double-checkpointing.
+
+    Soft pause (POST /v1/runs/:id/pause): only pending|running → paused (+ paused_at).
+    The API does not cancel in-flight worker work. A node already executing may finish and
+    checkpoint; if it is the last hop, the run can still become completed after a pause.
+    Jobs still in the outbox or SQS (not yet executing) honor paused and do not continue
+    until Resume. See docs/README.md Pause section.
   '''
 }
 

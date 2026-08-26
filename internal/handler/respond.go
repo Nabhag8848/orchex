@@ -40,6 +40,10 @@ func RunNotFound(id uuid.UUID) error {
 	return echo.NewHTTPError(http.StatusNotFound, "run "+id.String()+" not found")
 }
 
+func Conflict(msg string) error {
+	return echo.NewHTTPError(http.StatusConflict, msg)
+}
+
 func InternalError(msg string) error {
 	return echo.NewHTTPError(http.StatusInternalServerError, msg)
 }

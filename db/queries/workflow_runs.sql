@@ -55,3 +55,21 @@ INSERT INTO run_node_jobs_outbox (
     sqlc.arg('node_id'),
     1
 );
+
+-- name: WorkflowRunExists :one
+SELECT EXISTS(
+    SELECT 1
+    FROM workflow_runs
+    WHERE id = $1
+);
+
+-- Soft pause: pending|running → paused; already paused is idempotent (keep paused_at).
+-- Handler checks WorkflowRunExists first; no row here means terminal status → 409.
+-- name: PauseWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'paused',
+    paused_at = COALESCE(paused_at, now())
+WHERE id = $1
+  AND status IN ('pending', 'running', 'paused')
+RETURNING *;

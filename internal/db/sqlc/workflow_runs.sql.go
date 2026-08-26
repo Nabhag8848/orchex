@@ -157,3 +157,54 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 	)
 	return i, err
 }
+
+const pauseWorkflowRun = `-- name: PauseWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'paused',
+    paused_at = COALESCE(paused_at, now())
+WHERE id = $1
+  AND status IN ('pending', 'running', 'paused')
+RETURNING id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
+`
+
+// Soft pause: pending|running → paused; already paused is idempotent (keep paused_at).
+// Handler checks WorkflowRunExists first; no row here means terminal status → 409.
+func (q *Queries) PauseWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, pauseWorkflowRun, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Status,
+		&i.TriggerType,
+		&i.CurrentNodeID,
+		&i.CurrentNodeAttempt,
+		&i.LastOutput,
+		&i.Error,
+		&i.StartedAt,
+		&i.PausedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const workflowRunExists = `-- name: WorkflowRunExists :one
+SELECT EXISTS(
+    SELECT 1
+    FROM workflow_runs
+    WHERE id = $1
+)
+`
+
+func (q *Queries) WorkflowRunExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, workflowRunExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
