@@ -104,8 +104,16 @@ Host APIs (need `DATABASE_URL` in `.env`):
 ```bash
 make run              # builder-api on HTTP_ADDR (default :8080)
 make run-execution    # execution-api
-make run-worker       # execution-worker
+make run-worker       # execution-worker (needs SAM below for Function sandbox)
 ```
+
+Local Function sandbox (Docker + [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)):
+
+```bash
+make sam-local        # sam local start-lambda on :3001 (template.yaml)
+```
+
+Keep that running, then `make run-worker` (or Compose worker). SQS stays on ElasticMQ (`AWS_ENDPOINT_URL`); Lambda uses SAM (`LAMBDA_ENDPOINT_URL`). Production leaves both endpoint vars unset.
 
 After changing SQL queries or migrations:
 
@@ -115,16 +123,16 @@ make sqlc
 
 ## Local vs production
 
-|                 | Local                                                                                                             | Production                                                                                                                 |
-| --------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Compute**     | Docker Compose (`docker/Dockerfile.local`, `docker/Dockerfile.execution.local`, `docker/Dockerfile.worker.local`) | ECS Fargate (`docker/Dockerfile` / `docker/Dockerfile.execution` / `docker/Dockerfile.worker` — `linux/amd64`, distroless) |
-| **Database**    | `postgres:17-alpine` in Compose                                                                                   | Amazon RDS for PostgreSQL 17                                                                                               |
-| **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                         | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
-| **Function JS** | No sandbox Lambda; worker logs `sandbox: skip invoke (local)`                                                     | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN`)                  |
-| **Config**      | `.env` from `.env.example` (dummy AWS keys + `AWS_ENDPOINT_URL` for ElasticMQ)                                    | Terraform task definition + task role ([infra/](./infra/)). No dummy keys; `AWS_ENDPOINT_URL` unset                        |
-| **Migrations**  | goose one-shot `migrate` service on compose up                                                                    | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
-| **TLS to DB**   | `sslmode=disable`                                                                                                 | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
-| **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324`                                                        | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS and SQS in AWS                                        |
+|                 | Local                                                                                                                | Production                                                                                                                 |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Compute**     | Docker Compose (`docker/Dockerfile.local`, `docker/Dockerfile.execution.local`, `docker/Dockerfile.worker.local`)    | ECS Fargate (`docker/Dockerfile` / `docker/Dockerfile.execution` / `docker/Dockerfile.worker` — `linux/amd64`, distroless) |
+| **Database**    | `postgres:17-alpine` in Compose                                                                                      | Amazon RDS for PostgreSQL 17                                                                                               |
+| **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                            | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
+| **Function JS** | SAM local (`make sam-local`) → `orchex-function-sandbox`; worker uses `LAMBDA_ENDPOINT_URL` + `FUNCTION_SANDBOX_ARN` | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN` from Terraform)   |
+| **Config**      | `.env` from `.env.example` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM)                 | Terraform task definition + task role ([infra/](./infra/)). No dummy keys; both endpoint URLs unset                        |
+| **Migrations**  | goose one-shot `migrate` service on compose up                                                                       | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
+| **TLS to DB**   | `sslmode=disable`                                                                                                    | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
+| **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324` / `3001` (SAM)                                            | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |
 
 Infra (ECR, ALB, ECS, RDS, SQS, Lambda sandbox, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 

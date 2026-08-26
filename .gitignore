@@ -64,6 +64,9 @@ secrets/
 # local build artifacts if any
 docker-compose.override.yml
 
+# --- AWS SAM (local Lambda) ---
+.aws-sam/
+
 # --- IDE / editors ---
 .idea/
 .vscode/

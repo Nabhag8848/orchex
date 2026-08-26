@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Local SAM mirror of infra/modules/lambda_sandbox (orchex-function-sandbox).
+
+# Local only — production deploys the same handler via Terraform (infra/modules/lambda_sandbox).
+# Start:  sam local start-lambda --port 3001
+# Worker: FUNCTION_SANDBOX_ARN=orchex-function-sandbox LAMBDA_ENDPOINT_URL=http://localhost:3001
+
+Resources:
+  OrchexFunctionSandbox:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: orchex-function-sandbox
+      Description: Shared Function-node JS sandbox; workers Invoke with source, input, timeout_ms
+      Runtime: nodejs24.x
+      Architectures:
+        - x86_64
+      Handler: index.handler
+      Timeout: 300
+      MemorySize: 128
+      CodeUri: infra/modules/lambda_sandbox/src/

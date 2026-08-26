@@ -238,6 +238,7 @@ See [Lifecycle](#lifecycle) for commands.
 | `SQS_DLQ_URL`                                          | Task definition env               | Execution API                                                                  |
 | `AWS_REGION`                                           | Task definition env               | Execution API and worker (real SQS; do **not** set `AWS_ENDPOINT_URL` in prod) |
 | `FUNCTION_SANDBOX_ARN`                                 | Task definition env               | Worker (sync `Invoke` of `orchex-function-sandbox`)                            |
+| `LAMBDA_ENDPOINT_URL`                                  | **Local only** (not set in prod)  | SAM / emulator base URL; production uses the real Lambda API                   |
 
 ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATABASE_URL` via `task_exec_secret_arns`. Tasks do **not** read the RDS master secret at runtime.
 
@@ -396,7 +397,7 @@ For one-shot jobs (migrations, batch work), use **`modules/ecs_run_task`** inste
 | [`docker/Dockerfile.worker`](../docker/Dockerfile.worker)       | `orchex-execution-worker:latest` | `module.ecs_execution_worker` (service) |
 | [`docker/Dockerfile.migrate`](../docker/Dockerfile.migrate)     | `orchex-db-migrate:latest`       | `module.ecs_db_migrate` (`run-task`)    |
 
-Production images pin **`linux/amd64`** and use **distroless** runtimes. The Function sandbox is **not** a container — Terraform zips [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src) during apply. Local development uses [`docker/Dockerfile.local`](../docker/Dockerfile.local), [`docker/Dockerfile.execution.local`](../docker/Dockerfile.execution.local), [`docker/Dockerfile.worker.local`](../docker/Dockerfile.worker.local), ElasticMQ, and Compose ([`docker-compose.yml`](../docker-compose.yml)) — not deployed by this Terraform stack. Compose workers skip the sandbox (`FUNCTION_SANDBOX_ARN` unset and/or `AWS_ENDPOINT_URL` set).
+Production images pin **`linux/amd64`** and use **distroless** runtimes. The Function sandbox is **not** a container — Terraform zips [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src) during apply. Local development uses [`docker/Dockerfile.local`](../docker/Dockerfile.local), [`docker/Dockerfile.execution.local`](../docker/Dockerfile.execution.local), [`docker/Dockerfile.worker.local`](../docker/Dockerfile.worker.local), ElasticMQ, Compose ([`docker-compose.yml`](../docker-compose.yml)), and optional SAM (`template.yaml` + `make sam-local`). Compose sets `AWS_ENDPOINT_URL` for ElasticMQ (SQS only) and `LAMBDA_ENDPOINT_URL` for SAM (`host.docker.internal:3001`). Production leaves both endpoint vars unset and sets `FUNCTION_SANDBOX_ARN` to the real Lambda ARN.
 
 After `terraform apply`, the ALB DNS name is available via `terraform output -json alb`. RDS connection details are under `terraform output -json rds`.
 
@@ -727,7 +728,7 @@ The worker is not on the ALB. After apply, `FUNCTION_SANDBOX_ARN` is on the task
 
 - `sandbox: invoke ok payload=...` — task role can Invoke and the handler ran
 - `sandbox: invoke failed: ...` — IAM, timeout, or runtime error (`AccessDeniedException` is the worker-ACL case)
-- `sandbox: skip invoke (local)` — `FUNCTION_SANDBOX_ARN` empty or `AWS_ENDPOINT_URL` set (Compose)
+- `sandbox: skip invoke (FUNCTION_SANDBOX_ARN unset)` — ARN empty (local without SAM / misconfigured task)
 
 Push **`docker/Dockerfile.worker`** after the ping code landed, then force a new deployment; an old `:latest` image will not log those lines.
 

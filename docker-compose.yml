@@ -89,10 +89,15 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       SQS_QUEUE_URL: http://sqs:9324/000000000000/orchex-node-jobs
       AWS_ENDPOINT_URL: http://sqs:9324
+      # SAM on the host: make sam-local (port 3001)
+      FUNCTION_SANDBOX_ARN: orchex-function-sandbox
+      LAMBDA_ENDPOINT_URL: http://host.docker.internal:3001
       AWS_REGION: ap-south-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       AWS_EC2_METADATA_DISABLED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       migrate:
         condition: service_completed_successfully

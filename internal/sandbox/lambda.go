@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 )
 
@@ -25,6 +26,13 @@ func New(ctx context.Context, arn, region, endpoint string) (*Client, error) {
 	opts := []func(*awsconfig.LoadOptions) error{}
 	if region != "" {
 		opts = append(opts, awsconfig.WithRegion(region))
+	}
+	// Local SAM (and similar) need dummy static creds. Production leaves
+	// LAMBDA_ENDPOINT_URL unset so the default chain (ECS task role / SSO) is used.
+	if endpoint != "" {
+		opts = append(opts, awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider("test", "test", ""),
+		))
 	}
 
 	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)

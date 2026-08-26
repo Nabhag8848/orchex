@@ -31,13 +31,16 @@ func main() {
 	}
 	defer pool.Close()
 
-	if cfg.FunctionSandboxARN == "" || cfg.AWSEndpointURL != "" {
-		log.Printf("sandbox: skip invoke (local)")
+	if cfg.FunctionSandboxARN == "" {
+		log.Printf("sandbox: skip invoke (FUNCTION_SANDBOX_ARN unset)")
 	} else {
-		sb, err := sandbox.New(ctx, cfg.FunctionSandboxARN, cfg.AWSRegion, cfg.AWSEndpointURL)
+		sb, err := sandbox.New(ctx, cfg.FunctionSandboxARN, cfg.AWSRegion, cfg.LambdaEndpointURL)
 		if err != nil {
 			log.Printf("sandbox: client: %v", err)
 		} else {
+			if cfg.LambdaEndpointURL != "" {
+				log.Printf("sandbox: using endpoint=%s arn=%s", cfg.LambdaEndpointURL, cfg.FunctionSandboxARN)
+			}
 			pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			out, err := sb.Ping(pctx)
 			cancel()
