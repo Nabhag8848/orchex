@@ -73,3 +73,37 @@ SET
 WHERE id = $1
   AND status IN ('pending', 'running', 'paused')
 RETURNING *;
+
+-- Resume: paused → running. Handler checks exists first; no row → 409.
+-- name: ResumeWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'running',
+    paused_at = NULL
+WHERE id = $1
+  AND status = 'paused'
+RETURNING *;
+
+-- Stop: pending|running|paused → cancelled; already cancelled is idempotent.
+-- Handler checks exists first; completed|failed → no row → 409.
+-- name: StopWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'cancelled',
+    cancelled_at = COALESCE(cancelled_at, now())
+WHERE id = $1
+  AND status IN ('pending', 'running', 'paused', 'cancelled')
+RETURNING *;
+
+-- Retry: failed → running; clear failure markers and reset attempt.
+-- Handler checks exists first; no row → 409.
+-- name: RetryWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'running',
+    failed_at = NULL,
+    error = NULL,
+    current_node_attempt = 1
+WHERE id = $1
+  AND status = 'failed'
+RETURNING *;

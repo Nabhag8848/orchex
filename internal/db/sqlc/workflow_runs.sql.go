@@ -194,6 +194,115 @@ func (q *Queries) PauseWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowR
 	return i, err
 }
 
+const resumeWorkflowRun = `-- name: ResumeWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'running',
+    paused_at = NULL
+WHERE id = $1
+  AND status = 'paused'
+RETURNING id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
+`
+
+// Resume: paused → running. Handler checks exists first; no row → 409.
+func (q *Queries) ResumeWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, resumeWorkflowRun, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Status,
+		&i.TriggerType,
+		&i.CurrentNodeID,
+		&i.CurrentNodeAttempt,
+		&i.LastOutput,
+		&i.Error,
+		&i.StartedAt,
+		&i.PausedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const retryWorkflowRun = `-- name: RetryWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'running',
+    failed_at = NULL,
+    error = NULL,
+    current_node_attempt = 1
+WHERE id = $1
+  AND status = 'failed'
+RETURNING id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
+`
+
+// Retry: failed → running; clear failure markers and reset attempt.
+// Handler checks exists first; no row → 409.
+func (q *Queries) RetryWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, retryWorkflowRun, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Status,
+		&i.TriggerType,
+		&i.CurrentNodeID,
+		&i.CurrentNodeAttempt,
+		&i.LastOutput,
+		&i.Error,
+		&i.StartedAt,
+		&i.PausedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const stopWorkflowRun = `-- name: StopWorkflowRun :one
+UPDATE workflow_runs
+SET
+    status = 'cancelled',
+    cancelled_at = COALESCE(cancelled_at, now())
+WHERE id = $1
+  AND status IN ('pending', 'running', 'paused', 'cancelled')
+RETURNING id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
+`
+
+// Stop: pending|running|paused → cancelled; already cancelled is idempotent.
+// Handler checks exists first; completed|failed → no row → 409.
+func (q *Queries) StopWorkflowRun(ctx context.Context, id uuid.UUID) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, stopWorkflowRun, id)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.WorkflowVersionID,
+		&i.Status,
+		&i.TriggerType,
+		&i.CurrentNodeID,
+		&i.CurrentNodeAttempt,
+		&i.LastOutput,
+		&i.Error,
+		&i.StartedAt,
+		&i.PausedAt,
+		&i.CancelledAt,
+		&i.CompletedAt,
+		&i.FailedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const workflowRunExists = `-- name: WorkflowRunExists :one
 SELECT EXISTS(
     SELECT 1

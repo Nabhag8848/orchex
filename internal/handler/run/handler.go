@@ -23,6 +23,9 @@ func (h *Handler) Register(g *echo.Group) {
 	g.POST("", h.Start)
 	g.GET("/:id", h.Get)
 	g.POST("/:id/pause", h.Pause)
+	g.POST("/:id/resume", h.Resume)
+	g.POST("/:id/stop", h.Stop)
+	g.POST("/:id/retry", h.Retry)
 }
 
 func (h *Handler) Start(c *echo.Context) error {
