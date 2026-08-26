@@ -538,6 +538,7 @@ Saving performs soft graph validation plus strict config validation:
 - at most one outgoing edge per `(from_node_id, label)`;
 - `label` is `default`, `true`, or `false`;
 - each node's `config` validates against that type's `config_schema` (JSON Schema 2020-12, including format assertions such as `uri-template`).
+  Function `source` is only a required string (1–65,536 characters). **Source-code validation is deferred:** save and publish do not parse, lint, or type-check the JavaScript. Invalid snippets fail later in the sandbox as `RUNTIME_ERROR`.
 
 An incomplete graph (missing edges, unreachable nodes) is still allowed on save. Same-version edge integrity is also enforced by composite foreign keys in Postgres.
 
@@ -616,7 +617,7 @@ Publish performs hard validation, in order:
 - Conditional outgoing edges are labeled `true` and `false`; all other outgoing edges use `default`;
 - the graph is a DAG (no cycles; Kahn peel);
 - every node is reachable from Start;
-- each node's stored `config` still matches that type's `config_schema` (re-checked so a published graph cannot carry invalid settings).
+- each node's stored `config` still matches that type's `config_schema` (re-checked so a published graph cannot carry invalid settings). Function `source` is still only a string length check — JS parse/lint is deferred.
 
 Edge endpoints and unique IDs remain soft-validation concerns from Update. Same-version edge integrity comes from the database foreign keys.
 
@@ -1048,7 +1049,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 **Candidate:** Function executes JavaScript in isolation and may return any JSON value. Source is stored with the graph; a shared sandbox Lambda runs it — see the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
 
-- Config: `runtime` is fixed to `js`; `source` is required and may be up to 65,536 characters.
+- Config: `runtime` is fixed to `js`; `source` is required and may be up to 65,536 characters. `config_schema` does **not** validate that `source` is syntactically valid JavaScript — that is deferred; the sandbox reports `RUNTIME_ERROR` at run time.
 - Timeout: 5 seconds by default, from 1 ms to 300 seconds.
 - Input: open object under `data`.
 - Output: any JSON value under `data`.
@@ -1263,7 +1264,7 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 - client-generated logical ID;
 - node type reference;
 - unique name within the version (deferred unique, so swaps in one save are allowed);
-- JSON config validated against `node_types.config_schema` on save and publish;
+- JSON config validated against `node_types.config_schema` on save and publish (Function `source` is shape-only: string length. Parsing/linting the JS body is deferred);
 - optional canvas coordinates;
 - timestamps.
 
@@ -2367,7 +2368,8 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - transactional rollback;
 - stalled-run sweeper (re-mint a job from Postgres when a message vanishes or expires) — deferred because SQS durability removes the scary case;
 - relay `LISTEN`/`NOTIFY` hybrid — pure latency optimization, no contract change;
-- S3-backed Function artifacts and multi-sandbox sharding until load requires them.
+- S3-backed Function artifacts and multi-sandbox sharding until load requires them;
+- Function `source` code validation (parse / lint / type-check). v1 `config_schema` only requires a non-empty string ≤ 65,536 characters; invalid JS is not rejected on save or publish.
 
 These are not hidden assumptions. They are the next decisions the design needs.
 
