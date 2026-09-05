@@ -20,7 +20,7 @@ Design decisions, schemas, benches, and learning notes live in [docs/](./docs/).
 cp .env.example .env
 ```
 
-`.env` is used by Compose and by host tools (`make migrate-*`, `make run`).  
+`.env` is loaded by Compose and by the Makefile for host commands (`make migrate-*`, `make run`). The application reads the resulting process environment directly, so production can inject variables without any environment-specific code.
 `DATABASE_URL` uses `localhost` for the host; Compose rewrites it to the `postgres` service name inside the network.
 
 ### 2. Start the stack
@@ -129,7 +129,7 @@ make sqlc
 | **Database**    | `postgres:17-alpine` in Compose                                                                                      | Amazon RDS for PostgreSQL 17                                                                                               |
 | **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                            | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
 | **Function JS** | SAM local (`make sam-local`) → `orchex-function-sandbox`; worker uses `LAMBDA_ENDPOINT_URL` + `FUNCTION_SANDBOX_ARN` | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN` from Terraform)   |
-| **Config**      | `.env` from `.env.example` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM)                 | Terraform task definition + task role ([infra/](./infra/)). No dummy keys; both endpoint URLs unset                        |
+| **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM) | Terraform task definition + task role ([infra/](./infra/)). Injected environment variables are used directly |
 | **Migrations**  | goose one-shot `migrate` service on compose up                                                                       | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
 | **TLS to DB**   | `sslmode=disable`                                                                                                    | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
 | **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324` / `3001` (SAM)                                            | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |
