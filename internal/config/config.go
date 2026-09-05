@@ -6,24 +6,14 @@ import (
 )
 
 type Config struct {
-	HTTPAddr           string
-	DatabaseURL        string
-	SQSQueueURL        string
-	AWSRegion          string
-	AWSEndpointURL     string // SQS only (ElasticMQ locally). Empty in prod.
-	LambdaEndpointURL  string // Lambda only (SAM locally). Empty in prod.
-	FunctionSandboxARN string
+	HTTPAddr    string
+	DatabaseURL string
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:           getEnvOrDefault("HTTP_ADDR", ":8080"),
-		DatabaseURL:        os.Getenv("DATABASE_URL"),
-		SQSQueueURL:        os.Getenv("SQS_QUEUE_URL"),
-		AWSRegion:          getEnvOrDefault("AWS_REGION", "ap-south-1"),
-		AWSEndpointURL:     os.Getenv("AWS_ENDPOINT_URL"),
-		LambdaEndpointURL:  os.Getenv("LAMBDA_ENDPOINT_URL"),
-		FunctionSandboxARN: os.Getenv("FUNCTION_SANDBOX_ARN"),
+		HTTPAddr:    getEnvOrDefault("HTTP_ADDR", ":8080"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
 	}
 
 	if cfg.DatabaseURL == "" {
