@@ -30,21 +30,15 @@ func main() {
 	}
 	defer pool.Close()
 
-	if cfg.SQSQueueURL != "" {
-		if _, err := queue.New(ctx, cfg.SQSQueueURL, cfg.AWSRegion, cfg.AWSEndpointURL); err != nil {
-			log.Fatalf("sqs: %v", err)
-		}
-		if cfg.AWSEndpointURL != "" {
-			log.Printf("sqs: send client ready queue=%s endpoint=%s", cfg.SQSQueueURL, cfg.AWSEndpointURL)
-		} else {
-			log.Printf("sqs: send client ready queue=%s", cfg.SQSQueueURL)
-		}
-	} else {
-		log.Printf("sqs: SQS_QUEUE_URL unset")
+	store := db.NewStore(pool)
+	sqsQueue, err := queue.New(ctx, cfg.SQS)
+	if err != nil {
+		log.Fatalf("SQS: %v", err)
 	}
+	execution.StartRelay(ctx, store, sqsQueue)
 
 	e := execution.NewServer(execution.Deps{
-		Runs: run.New(db.NewStore(pool)),
+		Runs: run.New(store),
 	})
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}

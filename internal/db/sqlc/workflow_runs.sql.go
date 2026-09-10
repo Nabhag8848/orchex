@@ -12,6 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteRunNodeJobOutbox = `-- name: DeleteRunNodeJobOutbox :exec
+DELETE FROM run_node_jobs_outbox
+WHERE id = $1
+`
+
+func (q *Queries) DeleteRunNodeJobOutbox(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRunNodeJobOutbox, id)
+	return err
+}
+
 const getPublishedWorkflowForStart = `-- name: GetPublishedWorkflowForStart :one
 SELECT
     w.id,
@@ -156,6 +166,57 @@ func (q *Queries) InsertWorkflowRun(ctx context.Context, arg InsertWorkflowRunPa
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const lockDueRunNodeJobsOutbox = `-- name: LockDueRunNodeJobsOutbox :many
+SELECT
+    o.id,
+    o.run_id,
+    o.workflow_version_id,
+    o.node_id,
+    o.attempt,
+    r.status AS run_status
+FROM run_node_jobs_outbox o
+JOIN workflow_runs r ON r.id = o.run_id
+WHERE o.available_at IS NULL OR o.available_at < now()
+ORDER BY o.created_at
+FOR UPDATE OF o, r SKIP LOCKED
+`
+
+type LockDueRunNodeJobsOutboxRow struct {
+	ID                uuid.UUID         `json:"id"`
+	RunID             uuid.UUID         `json:"run_id"`
+	WorkflowVersionID uuid.UUID         `json:"workflow_version_id"`
+	NodeID            uuid.UUID         `json:"node_id"`
+	Attempt           int32             `json:"attempt"`
+	RunStatus         WorkflowRunStatus `json:"run_status"`
+}
+
+func (q *Queries) LockDueRunNodeJobsOutbox(ctx context.Context) ([]LockDueRunNodeJobsOutboxRow, error) {
+	rows, err := q.db.Query(ctx, lockDueRunNodeJobsOutbox)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockDueRunNodeJobsOutboxRow{}
+	for rows.Next() {
+		var i LockDueRunNodeJobsOutboxRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.WorkflowVersionID,
+			&i.NodeID,
+			&i.Attempt,
+			&i.RunStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const pauseWorkflowRun = `-- name: PauseWorkflowRun :one

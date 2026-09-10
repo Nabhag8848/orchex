@@ -2,95 +2,85 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"github.com/google/uuid"
+	appconfig "github.com/nabhag8848/orchex/internal/config"
 )
 
-type Message struct {
-	Body          string
-	MessageID     string
-	ReceiptHandle string
+type SQS struct {
+	client *sqs.Client
+	url    string
 }
 
-type Client struct {
-	sqs      *sqs.Client
-	queueURL string
+type NodeJobMessage struct {
+	RunID             uuid.UUID `json:"run_id"`
+	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
+	NodeID            uuid.UUID `json:"node_id"`
+	Attempt           int32     `json:"attempt"`
 }
 
-func New(ctx context.Context, queueURL, region, endpoint string) (*Client, error) {
-	if queueURL == "" {
-		return nil, fmt.Errorf("SQS_QUEUE_URL is required")
+func New(ctx context.Context, sqsConfig appconfig.SQSConfig) (*SQS, error) {
+	loadOptions := make([]func(*config.LoadOptions) error, 0, 1)
+	if region := sqsConfig.Region; region != "" {
+		loadOptions = append(loadOptions, config.WithRegion(region))
 	}
 
-	opts := []func(*awsconfig.LoadOptions) error{}
-	if region != "" {
-		opts = append(opts, awsconfig.WithRegion(region))
-	}
-	// Local ElasticMQ (and similar) need dummy static creds. Production leaves
-	// AWS_ENDPOINT_URL unset so the default chain (ECS task role / SSO) is used.
-	if endpoint != "" {
-		opts = append(opts, awsconfig.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider("test", "test", ""),
-		))
-	}
-
-	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	cfg, err := config.LoadDefaultConfig(ctx, loadOptions...)
 	if err != nil {
-		return nil, fmt.Errorf("aws config: %w", err)
+		return nil, fmt.Errorf("load AWS configuration: %w", err)
 	}
 
-	var sqsOpts []func(*sqs.Options)
-	if endpoint != "" {
-		sqsOpts = append(sqsOpts, func(o *sqs.Options) {
-			o.BaseEndpoint = aws.String(endpoint)
+	clientOptions := make([]func(*sqs.Options), 0, 1)
+	// Use the local SQS endpoint when one is configured. Otherwise use AWS SQS.
+	if endpoint := sqsConfig.EndpointURL; endpoint != "" {
+		clientOptions = append(clientOptions, func(options *sqs.Options) {
+			options.BaseEndpoint = aws.String(endpoint)
 		})
 	}
 
-	return &Client{
-		sqs:      sqs.NewFromConfig(cfg, sqsOpts...),
-		queueURL: queueURL,
+	return &SQS{
+		client: sqs.NewFromConfig(cfg, clientOptions...),
+		url:    sqsConfig.QueueURL,
 	}, nil
 }
 
-func (c *Client) Send(ctx context.Context, body string) (string, error) {
-	out, err := c.sqs.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    aws.String(c.queueURL),
-		MessageBody: aws.String(body),
-	})
+// Send adds a node job to the queue.
+func (q *SQS) Send(ctx context.Context, message NodeJobMessage) error {
+	body, err := json.Marshal(message)
 	if err != nil {
-		return "", err
+		return fmt.Errorf("marshal node job: %w", err)
 	}
-	return aws.ToString(out.MessageId), nil
+
+	_, err = q.client.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    aws.String(q.url),
+		MessageBody: aws.String(string(body)),
+	})
+	return err
 }
 
-func (c *Client) Receive(ctx context.Context) ([]Message, error) {
-	out, err := c.sqs.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            aws.String(c.queueURL),
+// Receive waits up to 20 seconds for up to ten messages.
+func (q *SQS) Receive(ctx context.Context) ([]types.Message, error) {
+	output, err := q.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl:            aws.String(q.url),
 		MaxNumberOfMessages: 10,
 		WaitTimeSeconds:     20,
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	msgs := make([]Message, 0, len(out.Messages))
-	for _, m := range out.Messages {
-		msgs = append(msgs, Message{
-			Body:          aws.ToString(m.Body),
-			MessageID:     aws.ToString(m.MessageId),
-			ReceiptHandle: aws.ToString(m.ReceiptHandle),
-		})
-	}
-	return msgs, nil
+	return output.Messages, nil
 }
 
-func (c *Client) Delete(ctx context.Context, receiptHandle string) error {
-	_, err := c.sqs.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(c.queueURL),
+// Delete removes a received message using its receipt handle.
+func (q *SQS) Delete(ctx context.Context, receiptHandle string) error {
+	_, err := q.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(q.url),
 		ReceiptHandle: aws.String(receiptHandle),
 	})
 	return err

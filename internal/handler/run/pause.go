@@ -10,7 +10,7 @@ import (
 )
 
 // Pause soft-pauses a run: pending|running → paused; already paused is idempotent.
-// Does not touch outbox, SQS, or in-flight workers.
+// Does not touch the outbox or in-flight workers.
 func (h *Handler) Pause(c *echo.Context) error {
 	id, err := parseID(c)
 	if err != nil {
