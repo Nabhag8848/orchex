@@ -12,6 +12,7 @@ import (
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/execution"
 	"github.com/nabhag8848/orchex/internal/handler/run"
+	"github.com/nabhag8848/orchex/internal/queue"
 )
 
 func main() {
@@ -29,8 +30,15 @@ func main() {
 	}
 	defer pool.Close()
 
+	store := db.NewStore(pool)
+	sqsQueue, err := queue.New(ctx, cfg.SQS)
+	if err != nil {
+		log.Fatalf("SQS: %v", err)
+	}
+	execution.StartRelay(ctx, store, sqsQueue)
+
 	e := execution.NewServer(execution.Deps{
-		Runs: run.New(db.NewStore(pool)),
+		Runs: run.New(store),
 	})
 
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}

@@ -56,6 +56,24 @@ INSERT INTO run_node_jobs_outbox (
     1
 );
 
+-- name: LockDueRunNodeJobsOutbox :many
+SELECT
+    o.id,
+    o.run_id,
+    o.workflow_version_id,
+    o.node_id,
+    o.attempt,
+    r.status AS run_status
+FROM run_node_jobs_outbox o
+JOIN workflow_runs r ON r.id = o.run_id
+WHERE o.available_at IS NULL OR o.available_at < now()
+ORDER BY o.created_at
+FOR UPDATE OF o, r SKIP LOCKED;
+
+-- name: DeleteRunNodeJobOutbox :exec
+DELETE FROM run_node_jobs_outbox
+WHERE id = $1;
+
 -- name: WorkflowRunExists :one
 SELECT EXISTS(
     SELECT 1
