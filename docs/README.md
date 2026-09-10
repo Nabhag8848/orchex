@@ -1334,7 +1334,7 @@ flowchart LR
     LB --> Exec["Execution Service"]
     Exec -->|"1. create run + first job<br/>(one transaction)"| PG[("PostgreSQL<br/>workflow_runs + outbox")]
     PG -->|"2. relay reads due jobs"| Relay["Relay"]
-    Relay -->|"3. push {run_id, node_id, attempt}"| Q["SQS standard queue"]
+    Relay -->|"3. push job identity"| Q["SQS standard queue"]
     Q -->|"4. worker takes job<br/>(visibility timeout)"| W["Workers"]
     W -->|"5. run the node"| Ext["Sandbox / external APIs"]
     W -->|"6. checkpoint + next job<br/>(one transaction)"| PG
@@ -1346,7 +1346,7 @@ flowchart LR
 The happy path, in words:
 
 1. The user starts a run. The execution service creates the run **and** its first job row in one Postgres transaction.
-2. The relay picks up the job row and pushes a small message to the queue: just `{run_id, node_id, attempt}`.
+2. The relay picks up the job row and pushes a small message to the queue: `{run_id, workflow_version_id, node_id, attempt}`.
 3. A worker takes the message, reads the run and its pinned graph from Postgres, and executes the node.
 4. The worker writes two things in one transaction: "the run is now at the next node" and "a job for that next node must be enqueued".
 5. The relay pushes that next job. Steps 3–5 repeat, one node at a time.
@@ -1461,7 +1461,7 @@ flowchart LR
     R -->|"delete row on success"| PG
 ```
 
-The relay loops every few hundred milliseconds: claim due rows, push them to the queue, delete them. `FOR UPDATE SKIP LOCKED` is Postgres for "lock the rows I claimed, and let other relay instances skip them instead of waiting" — so several relays can run at once with zero coordination.
+The current in-process relay polls once per second: it claims due rows, pushes eligible jobs to the queue, and deletes the rows. It locks both the outbox row and its run with `FOR UPDATE SKIP LOCKED`, so concurrent relay instances skip work already claimed by another instance. A job is sent only when its run is `pending` or `running`; rows for every other status are deleted without sending. Resume creates a new outbox row when work should continue.
 
 Both relay crash cases are safe:
 

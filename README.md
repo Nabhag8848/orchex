@@ -74,6 +74,16 @@ docker compose logs -f execution-worker
 
 Dummy AWS keys in `.env` (`test` / `test`) are enough for ElasticMQ.
 
+### SQS relay
+
+The execution API runs an in-process relay. Every second it reads due rows from
+`run_node_jobs_outbox`, locks them with `FOR UPDATE SKIP LOCKED`, and sends jobs
+for `pending` and `running` runs to SQS. Each message contains `run_id`,
+`workflow_version_id`, `node_id`, and `attempt`. A successfully sent row is
+deleted; rows for paused, cancelled, completed, or failed runs are deleted
+without being sent. If sending fails, the database transaction rolls back and
+the row is retried on a later tick.
+
 Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`), and the worker with `WORKER_HTTP_PORT` (default `8082`).
 
 Workflows live in the `public.workflows` table. Seed local samples that hit **public APIs** (httpbin, Open-Meteo, JSONPlaceholder) and use **all five node types** on every non-empty graph:
