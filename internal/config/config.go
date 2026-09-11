@@ -11,12 +11,19 @@ type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
 	SQS         SQSConfig
+	Lambda      LambdaConfig
 }
 
 type SQSConfig struct {
 	QueueURL    string
 	Region      string
 	EndpointURL string
+}
+
+type LambdaConfig struct {
+	FunctionSandboxARN string
+	EndpointURL        string
+	Region             string
 }
 
 func Load() (Config, error) {
@@ -33,6 +40,11 @@ func Load() (Config, error) {
 			QueueURL:    os.Getenv("SQS_QUEUE_URL"),
 			Region:      os.Getenv("AWS_REGION"),
 			EndpointURL: os.Getenv("AWS_ENDPOINT_URL"),
+		},
+		Lambda: LambdaConfig{
+			FunctionSandboxARN: os.Getenv("FUNCTION_SANDBOX_ARN"),
+			EndpointURL:        os.Getenv("LAMBDA_ENDPOINT_URL"),
+			Region:             os.Getenv("AWS_REGION"),
 		},
 	}
 

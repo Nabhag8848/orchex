@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
+	"github.com/nabhag8848/orchex/internal/sandbox"
 	"github.com/nabhag8848/orchex/internal/worker"
 )
 
@@ -27,6 +29,20 @@ func main() {
 		log.Fatalf("database: %v", err)
 	}
 	defer pool.Close()
+
+	go func() {
+		sandboxClient, err := sandbox.NewLambda(ctx, cfg.Lambda)
+		if err != nil {
+			log.Printf("sandbox: %v", err)
+			return
+		}
+		result, err := sandboxClient.Invoke(ctx, "return { ping: true };", json.RawMessage(`{"data":{}}`), 5000)
+		if err != nil {
+			log.Printf("sandbox: startup invoke: %v", err)
+			return
+		}
+		log.Printf("sandbox: startup invoke succeeded: %s", result)
+	}()
 
 	e := worker.NewServer()
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}

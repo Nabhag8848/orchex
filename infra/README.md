@@ -726,9 +726,8 @@ aws ecs update-service \
 
 The worker is not on the ALB. After apply, `FUNCTION_SANDBOX_ARN` is on the task. The worker process **connects to RDS first**; if Postgres is unreachable it never Invokes. With the current worker image, startup then sync-Invokes the sandbox once (`internal/sandbox` ping: `return { ping: true }` and `input: { data: {} }`). Watch the task’s CloudWatch logs:
 
-- `sandbox: invoke ok payload=...` — task role can Invoke and the handler ran
-- `sandbox: invoke failed: ...` — IAM, timeout, or runtime error (`AccessDeniedException` is the worker-ACL case)
-- `sandbox: skip invoke (FUNCTION_SANDBOX_ARN unset)` — ARN empty (local without SAM / misconfigured task)
+- `sandbox: startup invoke succeeded: ...` — task role can Invoke and the handler ran
+- `sandbox: startup invoke: ...` — IAM, timeout, or runtime error (`AccessDeniedException` is the worker-ACL case)
 
 Push **`docker/Dockerfile.worker`** after the ping code landed, then force a new deployment; an old `:latest` image will not log those lines.
 
