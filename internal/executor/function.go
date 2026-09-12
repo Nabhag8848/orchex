@@ -39,5 +39,5 @@ func (e *FunctionExecutor) Execute(ctx context.Context, node Node, input json.Ra
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Output: output}, nil
+	return Result{Output: output, NextEdgeLabel: "default"}, nil
 }

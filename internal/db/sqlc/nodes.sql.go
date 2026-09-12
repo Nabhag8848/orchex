@@ -32,45 +32,6 @@ func (q *Queries) DeleteNodesNotIn(ctx context.Context, arg DeleteNodesNotInPara
 	return err
 }
 
-const getNodeForExecution = `-- name: GetNodeForExecution :one
-SELECT
-    n.workflow_version_id,
-    n.id,
-    n.name,
-    nt.type,
-    n.config
-FROM nodes n
-INNER JOIN node_types nt ON nt.id = n.node_type_id
-WHERE n.workflow_version_id = $1
-  AND n.id = $2
-`
-
-type GetNodeForExecutionParams struct {
-	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
-	NodeID            uuid.UUID `json:"node_id"`
-}
-
-type GetNodeForExecutionRow struct {
-	WorkflowVersionID uuid.UUID       `json:"workflow_version_id"`
-	ID                uuid.UUID       `json:"id"`
-	Name              string          `json:"name"`
-	Type              string          `json:"type"`
-	Config            json.RawMessage `json:"config"`
-}
-
-func (q *Queries) GetNodeForExecution(ctx context.Context, arg GetNodeForExecutionParams) (GetNodeForExecutionRow, error) {
-	row := q.db.QueryRow(ctx, getNodeForExecution, arg.WorkflowVersionID, arg.NodeID)
-	var i GetNodeForExecutionRow
-	err := row.Scan(
-		&i.WorkflowVersionID,
-		&i.ID,
-		&i.Name,
-		&i.Type,
-		&i.Config,
-	)
-	return i, err
-}
-
 const listNodesForPublish = `-- name: ListNodesForPublish :many
 SELECT
     n.id,

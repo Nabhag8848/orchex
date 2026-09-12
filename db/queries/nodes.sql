@@ -38,18 +38,6 @@ FROM nodes n
 INNER JOIN node_types nt ON nt.id = n.node_type_id
 WHERE n.workflow_version_id = $1;
 
--- name: GetNodeForExecution :one
-SELECT
-    n.workflow_version_id,
-    n.id,
-    n.name,
-    nt.type,
-    n.config
-FROM nodes n
-INNER JOIN node_types nt ON nt.id = n.node_type_id
-WHERE n.workflow_version_id = sqlc.arg('workflow_version_id')
-  AND n.id = sqlc.arg('node_id');
-
 -- cardinality 0 (empty payload) deletes every node in the version.
 -- name: DeleteNodesNotIn :exec
 DELETE FROM nodes

@@ -56,7 +56,7 @@ func (e *APIExecutor) Execute(ctx context.Context, node Node, input json.RawMess
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Output: output}, nil
+	return Result{Output: output, NextEdgeLabel: "default"}, nil
 }
 
 func flattenHeaders(headers http.Header) map[string]string {
