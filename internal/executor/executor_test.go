@@ -39,15 +39,18 @@ func TestAPIExecutorUsesPreviousOutput(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
 		}
-		if string(body) != `{"data":{"payload":"hello"}}` {
+		if string(body) != `{"event":"high_value_order","payload":"hello"}` {
 			t.Fatalf("unexpected request body: %s", body)
+		}
+		if request.Header.Get("X-Orchex-Seed") != "high-value-order" {
+			t.Fatalf("missing configured request header")
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"ok":true}`))
 	}))
 	defer server.Close()
 
-	node := Node{Config: json.RawMessage(`{"method":"POST","url":"` + server.URL + `"}`)}
+	node := Node{Config: json.RawMessage(`{"method":"POST","url":"` + server.URL + `","headers":{"X-Orchex-Seed":"high-value-order"},"body_template":"{\"event\":\"high_value_order\"}"}`)}
 	input := json.RawMessage(`{"data":{"payload":"hello"}}`)
 	result, err := NewAPIExecutor().Execute(context.Background(), node, input)
 	if err != nil {
@@ -77,7 +80,7 @@ func TestFunctionExecutorInvokesSandbox(t *testing.T) {
 }
 
 func TestResponseExecutorCompletesRun(t *testing.T) {
-	node := Node{Config: json.RawMessage(`{"status_code":201,"headers":{"X-Request-ID":"request_1"}}`)}
+	node := Node{Config: json.RawMessage(`{"status_code":201,"headers":{"X-Request-ID":"request_1"},"body_template":"{\"status\":\"accepted\",\"order_id\":\"template_order\"}"}`)}
 	input := json.RawMessage(`{"data":{"order_id":"order_1"}}`)
 	result, err := NewResponseExecutor().Execute(context.Background(), node, input)
 	if err != nil {
@@ -85,6 +88,18 @@ func TestResponseExecutorCompletesRun(t *testing.T) {
 	}
 	if !result.Completed {
 		t.Fatal("response result should complete the run")
+	}
+
+	var output map[string]any
+	if err := json.Unmarshal(result.Output, &output); err != nil {
+		t.Fatalf("decode response output: %v", err)
+	}
+	body := output["data"].(map[string]any)["body"].(map[string]any)
+	if body["order_id"] != "order_1" {
+		t.Fatalf("unexpected response body: %s", result.Output)
+	}
+	if body["status"] != "accepted" {
+		t.Fatalf("missing response template field: %s", result.Output)
 	}
 }
 

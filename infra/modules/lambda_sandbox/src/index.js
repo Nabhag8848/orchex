@@ -52,7 +52,7 @@ exports.handler = async (event) => {
       async function () {},
     ).constructor;
     const data = await Promise.race([
-      Promise.resolve().then(() => new AsyncFunction("input", source)(input)),
+      Promise.resolve().then(() => new AsyncFunction("data", source)(input.data)),
       timeout,
     ]);
     return { data };

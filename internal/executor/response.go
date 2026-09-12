@@ -8,8 +8,9 @@ import (
 type ResponseExecutor struct{}
 
 type responseConfig struct {
-	StatusCode int               `json:"status_code"`
-	Headers    map[string]string `json:"headers"`
+	StatusCode   int               `json:"status_code"`
+	Headers      map[string]string `json:"headers"`
+	BodyTemplate string            `json:"body_template"`
 }
 
 func NewResponseExecutor() *ResponseExecutor {
@@ -29,10 +30,8 @@ func (e *ResponseExecutor) Execute(_ context.Context, node Node, input json.RawM
 		config.StatusCode = 200
 	}
 
-	var envelope struct {
-		Data any `json:"data"`
-	}
-	if err := json.Unmarshal(input, &envelope); err != nil {
+	body, err := mergeBody(config.BodyTemplate, input)
+	if err != nil {
 		return Result{}, err
 	}
 
@@ -40,7 +39,7 @@ func (e *ResponseExecutor) Execute(_ context.Context, node Node, input json.RawM
 		"data": map[string]any{
 			"status_code": config.StatusCode,
 			"headers":     config.Headers,
-			"body":        envelope.Data,
+			"body":        body,
 		},
 	})
 	if err != nil {

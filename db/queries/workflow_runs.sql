@@ -31,7 +31,8 @@ INSERT INTO workflow_runs (
     trigger_type,
     current_node_id,
     current_node_attempt,
-    last_output
+    last_output,
+    started_at
 ) VALUES (
     sqlc.arg('workflow_id'),
     sqlc.arg('workflow_version_id'),
@@ -39,7 +40,8 @@ INSERT INTO workflow_runs (
     'manual',
     sqlc.arg('current_node_id'),
     1,
-    sqlc.arg('last_output')
+    sqlc.arg('last_output'),
+    now()
 )
 RETURNING *;
 
@@ -55,6 +57,23 @@ INSERT INTO run_node_jobs_outbox (
     sqlc.arg('node_id'),
     1
 );
+
+-- name: AdvanceWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'running',
+    current_node_id = sqlc.arg('current_node_id'),
+    current_node_attempt = 1,
+    last_output = sqlc.arg('last_output')
+WHERE id = sqlc.arg('id');
+
+-- name: CompleteWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'completed',
+    last_output = sqlc.arg('last_output'),
+    completed_at = now()
+WHERE id = sqlc.arg('id');
 
 -- name: LockDueRunNodeJobsOutbox :many
 SELECT

@@ -24,6 +24,13 @@ SELECT id, from_node_id, to_node_id, label
 FROM workflow_edges
 WHERE workflow_version_id = $1;
 
+-- name: GetNextNodeForExecution :one
+SELECT to_node_id
+FROM workflow_edges
+WHERE workflow_version_id = sqlc.arg('workflow_version_id')
+  AND from_node_id = sqlc.arg('from_node_id')
+  AND label = sqlc.arg('label');
+
 -- cardinality 0 (empty payload) deletes every edge in the version.
 -- name: DeleteEdgesNotIn :exec
 DELETE FROM workflow_edges

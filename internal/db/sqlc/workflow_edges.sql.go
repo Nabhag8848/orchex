@@ -32,6 +32,27 @@ func (q *Queries) DeleteEdgesNotIn(ctx context.Context, arg DeleteEdgesNotInPara
 	return err
 }
 
+const getNextNodeForExecution = `-- name: GetNextNodeForExecution :one
+SELECT to_node_id
+FROM workflow_edges
+WHERE workflow_version_id = $1
+  AND from_node_id = $2
+  AND label = $3
+`
+
+type GetNextNodeForExecutionParams struct {
+	WorkflowVersionID uuid.UUID `json:"workflow_version_id"`
+	FromNodeID        uuid.UUID `json:"from_node_id"`
+	Label             EdgeLabel `json:"label"`
+}
+
+func (q *Queries) GetNextNodeForExecution(ctx context.Context, arg GetNextNodeForExecutionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getNextNodeForExecution, arg.WorkflowVersionID, arg.FromNodeID, arg.Label)
+	var to_node_id uuid.UUID
+	err := row.Scan(&to_node_id)
+	return to_node_id, err
+}
+
 const listEdgesForPublish = `-- name: ListEdgesForPublish :many
 SELECT id, from_node_id, to_node_id, label
 FROM workflow_edges

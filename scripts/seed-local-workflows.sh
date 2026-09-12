@@ -557,6 +557,24 @@ put_graph "$w_live" "$(graph_order_notify_json \
 curl -fsS -X POST "$BASE/v1/workflows/$w_live/publish" >/dev/null
 echo "order notify (published)         $w_live"
 
+w_weather_live="$(create \
+  "London weather via Open-Meteo" \
+  "Published path: validate coordinates, then GET Open-Meteo." | jq -r .id)"
+put_graph "$w_weather_live" "$(graph_weather_json \
+  "London weather via Open-Meteo" \
+  "Published path: validate coordinates, then GET Open-Meteo.")" >/dev/null
+curl -fsS -X POST "$BASE/v1/workflows/$w_weather_live/publish" >/dev/null
+echo "weather (published)               $w_weather_live"
+
+w_posts_live="$(create \
+  "Create demo post (JSONPlaceholder)" \
+  "Published path: validate content, then POST JSONPlaceholder." | jq -r .id)"
+put_graph "$w_posts_live" "$(graph_jsonplaceholder_json \
+  "Create demo post (JSONPlaceholder)" \
+  "Published path: validate content, then POST JSONPlaceholder.")" >/dev/null
+curl -fsS -X POST "$BASE/v1/workflows/$w_posts_live/publish" >/dev/null
+echo "jsonplaceholder (published)       $w_posts_live"
+
 w_archived="$(create \
   "Old httpbin ping (retired)" \
   "Retired smoke workflow against httpbin — archived." | jq -r .id)"
@@ -580,6 +598,12 @@ echo "curl -sS $BASE/v1/workflows/$w_posts | jq '.graph.nodes[] | {name, node_ty
 echo
 echo "# published order notify"
 echo "curl -sS '$BASE/v1/workflows/$w_live?version=published' | jq '.graph.nodes[] | {name, node_type, config}'"
+echo
+echo "# published weather"
+echo "curl -sS '$BASE/v1/workflows/$w_weather_live?version=published' | jq '.graph.nodes[] | {name, node_type, config}'"
+echo
+echo "# published jsonplaceholder"
+echo "curl -sS '$BASE/v1/workflows/$w_posts_live?version=published' | jq '.graph.nodes[] | {name, node_type, config}'"
 echo
 echo "# re-save weather graph"
 weather_body="$(graph_weather_json \
@@ -609,10 +633,20 @@ echo "curl -i -sS -X DELETE $BASE/v1/workflows/$w_bad_cfg"
 echo
 echo "-- sample run payloads (execution) --"
 order_hi="$(jq -c -n --arg id "$w_live" '{workflow_id:$id,payload:{order_id:"ord_9001",email:"buyer@example.com",amount_cents:14999,currency:"usd"}}')"
-order_lo="$(jq -c -n --arg id "$w_order" '{workflow_id:$id,payload:{order_id:"ord_22",email:"buyer@example.com",amount_cents:2500,currency:"usd"}}')"
-weather_payload="$(jq -c -n --arg id "$w_weather" '{workflow_id:$id,payload:{latitude:51.5074,longitude:-0.1278,place:"London"}}')"
-post_payload="$(jq -c -n --arg id "$w_posts" '{workflow_id:$id,payload:{title:"Hello Orchex",body:"Public API seed post",user_id:1}}')"
-echo "curl -sS -X POST $EXEC/v1/runs -H 'Content-Type: application/json' -d $(jq -n --arg p "$order_hi" '$p|@json')"
-echo "curl -sS -X POST $EXEC/v1/runs -H 'Content-Type: application/json' -d $(jq -n --arg p "$order_lo" '$p|@json')"
-echo "curl -sS -X POST $EXEC/v1/runs -H 'Content-Type: application/json' -d $(jq -n --arg p "$weather_payload" '$p|@json')"
-echo "curl -sS -X POST $EXEC/v1/runs -H 'Content-Type: application/json' -d $(jq -n --arg p "$post_payload" '$p|@json')"
+order_lo="$(jq -c -n --arg id "$w_live" '{workflow_id:$id,payload:{order_id:"ord_22",email:"buyer@example.com",amount_cents:2500,currency:"usd"}}')"
+weather_payload="$(jq -c -n --arg id "$w_weather_live" '{workflow_id:$id,payload:{latitude:51.5074,longitude:-0.1278,place:"London"}}')"
+post_payload="$(jq -c -n --arg id "$w_posts_live" '{workflow_id:$id,payload:{title:"Hello Orchex",body:"Public API seed post",user_id:1}}')"
+print_run_curl() {
+  local payload="$1"
+  printf "curl -sS -X POST %s/v1/runs -H 'Content-Type: application/json' -d %s\n" \
+    "$EXEC" "$(jq -rn --arg payload "$payload" '$payload | @sh')"
+}
+
+echo "# published order: high-value branch"
+print_run_curl "$order_hi"
+echo "# published order: low-value branch"
+print_run_curl "$order_lo"
+echo "# published weather"
+print_run_curl "$weather_payload"
+echo "# published JSONPlaceholder post"
+print_run_curl "$post_payload"

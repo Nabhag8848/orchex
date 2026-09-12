@@ -12,6 +12,46 @@ import (
 	"github.com/google/uuid"
 )
 
+const advanceWorkflowRun = `-- name: AdvanceWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'running',
+    current_node_id = $1,
+    current_node_attempt = 1,
+    last_output = $2
+WHERE id = $3
+`
+
+type AdvanceWorkflowRunParams struct {
+	CurrentNodeID uuid.UUID       `json:"current_node_id"`
+	LastOutput    json.RawMessage `json:"last_output"`
+	ID            uuid.UUID       `json:"id"`
+}
+
+func (q *Queries) AdvanceWorkflowRun(ctx context.Context, arg AdvanceWorkflowRunParams) error {
+	_, err := q.db.Exec(ctx, advanceWorkflowRun, arg.CurrentNodeID, arg.LastOutput, arg.ID)
+	return err
+}
+
+const completeWorkflowRun = `-- name: CompleteWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'completed',
+    last_output = $1,
+    completed_at = now()
+WHERE id = $2
+`
+
+type CompleteWorkflowRunParams struct {
+	LastOutput json.RawMessage `json:"last_output"`
+	ID         uuid.UUID       `json:"id"`
+}
+
+func (q *Queries) CompleteWorkflowRun(ctx context.Context, arg CompleteWorkflowRunParams) error {
+	_, err := q.db.Exec(ctx, completeWorkflowRun, arg.LastOutput, arg.ID)
+	return err
+}
+
 const deleteRunNodeJobOutbox = `-- name: DeleteRunNodeJobOutbox :exec
 DELETE FROM run_node_jobs_outbox
 WHERE id = $1
@@ -119,7 +159,8 @@ INSERT INTO workflow_runs (
     trigger_type,
     current_node_id,
     current_node_attempt,
-    last_output
+    last_output,
+    started_at
 ) VALUES (
     $1,
     $2,
@@ -127,7 +168,8 @@ INSERT INTO workflow_runs (
     'manual',
     $3,
     1,
-    $4
+    $4,
+    now()
 )
 RETURNING id, workflow_id, workflow_version_id, status, trigger_type, current_node_id, current_node_attempt, last_output, error, started_at, paused_at, cancelled_at, completed_at, failed_at, created_at, updated_at
 `
