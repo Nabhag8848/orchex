@@ -70,6 +70,7 @@ func (q *SQS) Receive(ctx context.Context) ([]types.Message, error) {
 		QueueUrl:            aws.String(q.url),
 		MaxNumberOfMessages: 10,
 		WaitTimeSeconds:     20,
+		VisibilityTimeout:   30,
 	})
 	if err != nil {
 		return nil, err
