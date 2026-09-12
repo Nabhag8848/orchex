@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,20 +12,23 @@ import (
 	"github.com/nabhag8848/orchex/internal/config"
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/handler/workflow"
+	"github.com/nabhag8848/orchex/internal/logger"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Configure("info")
+		logger.Fatal("load config", "error", err)
 	}
+	logger.Configure(cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		logger.Fatal("connect database", "error", err)
 	}
 	defer pool.Close()
 
@@ -33,8 +36,9 @@ func main() {
 		Workflows: workflow.New(db.NewStore(pool)),
 	})
 
+	slog.Info("builder API starting", "address", cfg.HTTPAddr)
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}
 	if err := sc.Start(ctx, e); err != nil {
-		log.Fatalf("server: %v", err)
+		logger.Fatal("start server", "error", err)
 	}
 }

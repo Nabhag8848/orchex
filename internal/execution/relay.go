@@ -2,7 +2,7 @@ package execution
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/nabhag8848/orchex/internal/db"
@@ -22,7 +22,7 @@ func StartRelay(ctx context.Context, store *db.Store, sqs *queue.SQS) {
 				return
 			case <-ticker.C:
 				if err := relay(ctx, store, sqs); err != nil && ctx.Err() == nil {
-					log.Printf("relay: %v", err)
+					slog.Warn("relay run-node jobs", "error", err)
 				}
 			}
 		}

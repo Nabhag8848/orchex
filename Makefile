@@ -30,7 +30,7 @@ run-worker:
 
 # Local Lambda sandbox (needs Docker). Pair with make run-worker / compose worker.
 sam-local:
-	sam local start-lambda --port 3001 --host 0.0.0.0
+	sam local start-lambda --skip-pull-image --port 3001 --host 0.0.0.0
 
 test:
 	go test ./...

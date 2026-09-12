@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +15,7 @@ import (
 	"github.com/nabhag8848/orchex/internal/db"
 	sqlcdb "github.com/nabhag8848/orchex/internal/db/sqlc"
 	"github.com/nabhag8848/orchex/internal/executor"
+	"github.com/nabhag8848/orchex/internal/logger"
 	"github.com/nabhag8848/orchex/internal/queue"
 	"github.com/nabhag8848/orchex/internal/sandbox"
 	"github.com/nabhag8848/orchex/internal/worker"
@@ -23,27 +24,29 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Configure("info")
+		logger.Fatal("load config", "error", err)
 	}
+	logger.Configure(cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		logger.Fatal("connect database", "error", err)
 	}
 	defer pool.Close()
 	store := db.NewStore(pool)
 
 	sandboxClient, err := sandbox.NewLambda(ctx, cfg.Lambda)
 	if err != nil {
-		log.Fatalf("sandbox: %v", err)
+		logger.Fatal("create sandbox client", "error", err)
 	}
 
 	sqsQueue, err := queue.New(ctx, cfg.SQS)
 	if err != nil {
-		log.Fatalf("SQS: %v", err)
+		logger.Fatal("create SQS client", "error", err)
 	}
 	deps := workerDeps{
 		store:    store,
@@ -64,10 +67,11 @@ func main() {
 				if ctx.Err() != nil {
 					return
 				}
-				log.Printf("worker: receive node jobs: %v", err)
+				slog.Warn("receive node jobs", "error", err)
 				continue
 			}
 
+			slog.Debug("received node jobs", "count", len(messages))
 			for _, message := range messages {
 				go handleNodeJob(ctx, deps, message)
 			}
@@ -77,16 +81,17 @@ func main() {
 	go func() {
 		result, err := sandboxClient.Invoke(ctx, "return { ping: true };", json.RawMessage(`{"data":{}}`), 5000)
 		if err != nil {
-			log.Printf("sandbox: startup invoke: %v", err)
+			slog.Warn("sandbox startup invoke failed", "error", err)
 			return
 		}
-		log.Printf("sandbox: startup invoke succeeded: %s", result)
+		slog.Debug("sandbox startup invoke succeeded", "result", string(result))
 	}()
 
 	e := worker.NewServer()
+	slog.Info("execution worker starting", "address", cfg.HTTPAddr)
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}
 	if err := sc.Start(ctx, e); err != nil {
-		log.Fatalf("server: %v", err)
+		logger.Fatal("start server", "error", err)
 	}
 }
 
@@ -103,13 +108,14 @@ func handleNodeJob(ctx context.Context, deps workerDeps, message types.Message) 
 
 	var job queue.NodeJobMessage
 	if err := json.Unmarshal([]byte(*message.Body), &job); err != nil {
-		log.Printf("worker: decode node job: %v", err)
+		slog.Warn("decode node job", "error", err)
 		return
 	}
+	slog.Debug("execute node job", "run_id", job.RunID, "node_id", job.NodeID, "attempt", job.Attempt)
 
 	workflowRun, err := deps.store.GetWorkflowRun(ctx, job.RunID)
 	if err != nil {
-		log.Printf("worker: get run %s: %v", job.RunID, err)
+		slog.Warn("get workflow run", "run_id", job.RunID, "error", err)
 		return
 	}
 	if workflowRun.Status == sqlcdb.WorkflowRunStatusPending || workflowRun.Status == sqlcdb.WorkflowRunStatusRunning {
@@ -118,9 +124,15 @@ func handleNodeJob(ctx context.Context, deps workerDeps, message types.Message) 
 			NodeID:            workflowRun.CurrentNodeID,
 		})
 		if err != nil {
-			log.Printf("worker: get current node for run %s: %v", workflowRun.ID, err)
+			slog.Warn("get current node", "run_id", workflowRun.ID, "error", err)
 			return
 		}
+		slog.Debug("node execution started",
+			"run_id", workflowRun.ID,
+			"node_id", nodeRow.ID,
+			"node_type", nodeRow.Type,
+			"input", string(workflowRun.LastOutput),
+		)
 
 		result, err := deps.registry.Execute(ctx, executor.Node{
 			WorkflowVersionID: nodeRow.WorkflowVersionID,
@@ -130,22 +142,32 @@ func handleNodeJob(ctx context.Context, deps workerDeps, message types.Message) 
 			Config:            nodeRow.Config,
 		}, workflowRun.LastOutput)
 		if err != nil {
-			log.Printf("worker: execute node for run %s: %v", workflowRun.ID, err)
+			slog.Warn("execute node", "run_id", workflowRun.ID, "node_id", nodeRow.ID, "node_type", nodeRow.Type, "error", err)
 			return
 		}
+		slog.Debug("node execution completed",
+			"run_id", workflowRun.ID,
+			"node_id", nodeRow.ID,
+			"node_type", nodeRow.Type,
+			"output", string(result.Output),
+			"next_edge_label", result.NextEdgeLabel,
+			"completed", result.Completed,
+		)
 
 		if err := persistNodeResult(ctx, deps.store, workflowRun, nodeRow.ID, result); err != nil {
-			log.Printf("worker: persist node result for run %s: %v", workflowRun.ID, err)
+			slog.Warn("persist node result", "run_id", workflowRun.ID, "node_id", nodeRow.ID, "error", err)
 			return
 		}
 		deleteNodeJob(ctx, deps.sqsQueue, message)
 	} else {
+		slog.Debug("delete node job for inactive run", "run_id", workflowRun.ID, "status", workflowRun.Status)
 		deleteNodeJob(ctx, deps.sqsQueue, message)
 	}
 }
 
 func persistNodeResult(ctx context.Context, store *db.Store, workflowRun sqlcdb.WorkflowRun, nodeID uuid.UUID, result executor.Result) error {
-	return store.InTx(ctx, func(q *sqlcdb.Queries) error {
+	var nextNodeID uuid.UUID
+	err := store.InTx(ctx, func(q *sqlcdb.Queries) error {
 		if result.Completed {
 			return q.CompleteWorkflowRun(ctx, sqlcdb.CompleteWorkflowRunParams{
 				ID:         workflowRun.ID,
@@ -153,7 +175,8 @@ func persistNodeResult(ctx context.Context, store *db.Store, workflowRun sqlcdb.
 			})
 		}
 
-		nextNodeID, err := q.GetNextNodeForExecution(ctx, sqlcdb.GetNextNodeForExecutionParams{
+		var err error
+		nextNodeID, err = q.GetNextNodeForExecution(ctx, sqlcdb.GetNextNodeForExecutionParams{
 			WorkflowVersionID: workflowRun.WorkflowVersionID,
 			FromNodeID:        nodeID,
 			Label:             sqlcdb.EdgeLabel(result.NextEdgeLabel),
@@ -176,10 +199,27 @@ func persistNodeResult(ctx context.Context, store *db.Store, workflowRun sqlcdb.
 			NodeID:            nextNodeID,
 		})
 	})
+	if err != nil {
+		return err
+	}
+
+	if result.Completed {
+		slog.Debug("workflow run completed", "run_id", workflowRun.ID, "node_id", nodeID, "output", string(result.Output))
+		return nil
+	}
+
+	slog.Debug("workflow run advanced",
+		"run_id", workflowRun.ID,
+		"from_node_id", nodeID,
+		"to_node_id", nextNodeID,
+		"next_edge_label", result.NextEdgeLabel,
+	)
+	slog.Debug("queued next node job", "run_id", workflowRun.ID, "node_id", nextNodeID)
+	return nil
 }
 
 func deleteNodeJob(ctx context.Context, sqsQueue *queue.SQS, message types.Message) {
 	if err := sqsQueue.Delete(ctx, *message.ReceiptHandle); err != nil {
-		log.Printf("worker: delete node job: %v", err)
+		slog.Warn("delete node job", "error", err)
 	}
 }

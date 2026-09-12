@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,28 +12,31 @@ import (
 	"github.com/nabhag8848/orchex/internal/db"
 	"github.com/nabhag8848/orchex/internal/execution"
 	"github.com/nabhag8848/orchex/internal/handler/run"
+	"github.com/nabhag8848/orchex/internal/logger"
 	"github.com/nabhag8848/orchex/internal/queue"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		logger.Configure("info")
+		logger.Fatal("load config", "error", err)
 	}
+	logger.Configure(cfg.LogLevel)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := db.NewPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("database: %v", err)
+		logger.Fatal("connect database", "error", err)
 	}
 	defer pool.Close()
 
 	store := db.NewStore(pool)
 	sqsQueue, err := queue.New(ctx, cfg.SQS)
 	if err != nil {
-		log.Fatalf("SQS: %v", err)
+		logger.Fatal("create SQS client", "error", err)
 	}
 	execution.StartRelay(ctx, store, sqsQueue)
 
@@ -41,8 +44,9 @@ func main() {
 		Runs: run.New(store),
 	})
 
+	slog.Info("execution API starting", "address", cfg.HTTPAddr)
 	sc := echo.StartConfig{Address: cfg.HTTPAddr}
 	if err := sc.Start(ctx, e); err != nil {
-		log.Fatalf("server: %v", err)
+		logger.Fatal("start server", "error", err)
 	}
 }

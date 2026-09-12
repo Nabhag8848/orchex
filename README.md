@@ -22,6 +22,7 @@ cp .env.example .env
 
 `.env` is loaded by Compose and by the Makefile for host commands (`make migrate-*`, `make run`). The application reads the resulting process environment directly, so production can inject variables without any environment-specific code.
 `DATABASE_URL` uses `localhost` for the host; Compose rewrites it to the `postgres` service name inside the network.
+Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose defaults to `debug`; the application and Terraform defaults are `info`. Services emit JSON logs to stdout.
 
 ### 2. Start the stack
 
@@ -99,7 +100,52 @@ curl -sS http://localhost:8080/v1/workflows | jq '.items[] | {id, name, status}'
 curl -sS http://localhost:8080/v1/workflows/<uuid> | jq '.graph.nodes[] | {name, node_type, config}'
 ```
 
-The script prints more builder curls after seeding.
+The script prints builder curls plus directly runnable `POST /v1/runs` examples for the published workflows.
+
+### Execute a workflow locally
+
+The seeded workflows include a Function node, so start the Lambda emulator before invoking one:
+
+```bash
+make sam-local
+```
+
+In another terminal, run `make seed-local`, then copy one of its printed `POST /v1/runs` commands. The request body is ordinary JSON: `payload` is the input object, not a quoted JSON string and not wrapped in another `data` object.
+
+```bash
+WORKFLOW_ID=<published-workflow-id>
+
+RUN_ID="$(curl -sS -X POST http://localhost:8081/v1/runs \
+  -H 'Content-Type: application/json' \
+  -d "{\"workflow_id\":\"$WORKFLOW_ID\",\"payload\":{\"order_id\":\"ord_9001\",\"email\":\"buyer@example.com\",\"amount_cents\":14999,\"currency\":\"usd\"}}" \
+  | jq -r '.id')"
+
+curl -sS "http://localhost:8081/v1/runs/$RUN_ID" | jq
+```
+
+Starting a run creates it as `pending`, records `started_at`, and writes the Start node job to the outbox in the same transaction. The relay sends that job to SQS; the worker processes one node hop at a time, persists its output, and writes the next node job to the outbox. A Response node marks the run `completed` and sets `completed_at`.
+
+The current worker executes these node types:
+
+| Node type | Runtime behavior |
+| --- | --- |
+| `start` | Forwards the input envelope to the default edge. |
+| `function` | Invokes the shared Lambda sandbox with JavaScript source and the previous output. Sandbox code receives the prior `data` object as `data`. |
+| `conditional` | Evaluates a strict `==` expression against the previous output and follows its `true` or `false` edge. |
+| `api` | Makes the configured HTTP request and stores response status, headers, and body as output. |
+| `response` | Produces the final response output and completes the workflow run. |
+
+For API and Response nodes, `body_template` is the base object. Fields from the previous output's `data` object are merged on top, so received data wins when both contain the same top-level field. Node configuration contracts live in [`docs/node-type-schemas/`](./docs/node-type-schemas/).
+
+### Worker debug trace
+
+Compose defaults to `LOG_LEVEL=debug`. Follow the worker while running a seeded workflow:
+
+```bash
+docker compose logs -f --tail=0 execution-worker
+```
+
+Each hop logs the run and node IDs, node type, executor input, executor output, selected edge, outbox enqueue, and final completion. These payload-level events are `debug` only; ECS runs at `info` by default. Do not enable `debug` in production for workflows containing sensitive payload data.
 
 ### Optional: API on the host
 
@@ -123,6 +169,8 @@ Local Function sandbox (Docker + [AWS SAM CLI](https://docs.aws.amazon.com/serve
 make sam-local        # sam local start-lambda on :3001 (template.yaml)
 ```
 
+`make sam-local` uses SAM's `--skip-pull-image` flag, so it reuses a cached Lambda runtime image instead of pulling it on every start. Pull the image manually first when the runtime changes: `sam local start-lambda --port 3001 --host 0.0.0.0`.
+
 Keep that running, then `make run-worker` (or Compose worker). SQS stays on ElasticMQ (`AWS_ENDPOINT_URL`); Lambda uses SAM (`LAMBDA_ENDPOINT_URL`). Production leaves both endpoint vars unset.
 
 After changing SQL queries or migrations:
@@ -139,7 +187,7 @@ make sqlc
 | **Database**    | `postgres:17-alpine` in Compose                                                                                      | Amazon RDS for PostgreSQL 17                                                                                               |
 | **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                            | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
 | **Function JS** | SAM local (`make sam-local`) → `orchex-function-sandbox`; worker uses `LAMBDA_ENDPOINT_URL` + `FUNCTION_SANDBOX_ARN` | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN` from Terraform)   |
-| **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM) | Terraform task definition + task role ([infra/](./infra/)). Injected environment variables are used directly |
+| **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM; `LOG_LEVEL=debug`) | Terraform task definition + task role ([infra/](./infra/)); `LOG_LEVEL=info`; injected environment variables are used directly |
 | **Migrations**  | goose one-shot `migrate` service on compose up                                                                       | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
 | **TLS to DB**   | `sslmode=disable`                                                                                                    | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
 | **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324` / `3001` (SAM)                                            | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |

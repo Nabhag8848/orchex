@@ -10,6 +10,7 @@ import (
 type Config struct {
 	HTTPAddr    string
 	DatabaseURL string
+	LogLevel    string
 	SQS         SQSConfig
 	Lambda      LambdaConfig
 }
@@ -36,6 +37,7 @@ func Load() (Config, error) {
 	cfg := Config{
 		HTTPAddr:    getEnvOrDefault("HTTP_ADDR", ":8080"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
+		LogLevel:    getEnvOrDefault("LOG_LEVEL", "info"),
 		SQS: SQSConfig{
 			QueueURL:    os.Getenv("SQS_QUEUE_URL"),
 			Region:      os.Getenv("AWS_REGION"),

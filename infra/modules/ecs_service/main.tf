@@ -13,6 +13,7 @@ locals {
   container_environment = concat(
     [
       { name = "HTTP_ADDR", value = ":8080" },
+      { name = "LOG_LEVEL", value = "info" },
     ],
     var.extra_environment,
   )

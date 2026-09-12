@@ -39,6 +39,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -59,6 +60,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
       SQS_QUEUE_URL: http://sqs:9324/000000000000/orchex-node-jobs
       AWS_ENDPOINT_URL: http://sqs:9324
       AWS_REGION: ap-south-1
@@ -87,6 +89,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
       SQS_QUEUE_URL: http://sqs:9324/000000000000/orchex-node-jobs
       AWS_ENDPOINT_URL: http://sqs:9324
       # SAM on the host: make sam-local (port 3001)
