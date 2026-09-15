@@ -36,7 +36,7 @@ This starts:
 2. **migrate** — goose applies `db/migrations`
 3. **builder-api** — workflows API on host port `8080` (after migrate succeeds)
 4. **execution-api** — execution API on host port `8081` (after migrate succeeds)
-5. **execution-worker** — internal worker on host port `8082`
+5. **execution-worker** — internal worker with no published host port
 6. **sqs** — ElasticMQ (SQS-compatible) on host port `9324`
 
 Compose lives at the repo root. Image definitions are under [`docker/`](./docker/) (`Dockerfile*.local` for Compose; distroless `Dockerfile*` for ECS). Build context is still the repository root.
@@ -49,6 +49,30 @@ make compose-logs
 make compose-down
 ```
 
+### Scale workers up or down
+
+With the stack already running, set the desired number of worker containers:
+
+```bash
+# Scale up to four workers total.
+docker compose up -d --no-deps --scale execution-worker=4 execution-worker
+
+# Scale down to one worker.
+docker compose up -d --no-deps --scale execution-worker=1 execution-worker
+
+# Scale down to zero workers (stop consuming jobs).
+docker compose up -d --no-deps --scale execution-worker=0 execution-worker
+
+# Check replica health and follow logs from all workers.
+docker compose ps execution-worker
+docker compose logs -f execution-worker
+```
+
+All replicas consume the same SQS queue. These commands use the existing image; add `--build` to rebuild after code changes. After removing the stack with `make compose-down`, include the desired `--scale` value when starting it again.
+
+The worker has no fixed host port, so replicas can run together without port conflicts. Each container checks its own `/health/worker` endpoint on internal port `8080`.
+
+
 ### 3. Smoke check
 
 ```bash
@@ -58,7 +82,7 @@ curl http://localhost:8080/health/builder
 curl http://localhost:8081/health/execution
 # → {"status":"ok"}
 
-curl http://localhost:8082/health/worker
+docker compose exec --index 1 execution-worker curl -fsS http://127.0.0.1:8080/health/worker
 # → {"status":"ok"}
 ```
 
@@ -85,7 +109,7 @@ deleted; rows for paused, cancelled, completed, or failed runs are deleted
 without being sent. If sending fails, the database transaction rolls back and
 the row is retried on a later tick.
 
-Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`), and the worker with `WORKER_HTTP_PORT` (default `8082`).
+Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`). The Compose worker does not publish a host port.
 
 Workflows live in the `public.workflows` table. Seed local samples that hit **public APIs** (httpbin, Open-Meteo, JSONPlaceholder) and use **all five node types** on every non-empty graph:
 
@@ -190,7 +214,7 @@ make sqlc
 | **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM; `LOG_LEVEL=debug`) | Terraform task definition + task role ([infra/](./infra/)); `LOG_LEVEL=info`; injected environment variables are used directly |
 | **Migrations**  | goose one-shot `migrate` service on compose up                                                                       | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
 | **TLS to DB**   | `sslmode=disable`                                                                                                    | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
-| **Networking**  | localhost ports `5432` / `8080` / `8081` / `8082` / `9324` / `3001` (SAM)                                            | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |
+| **Networking**  | localhost ports `5432` / `8080` / `8081` / `9324` / `3001` (SAM); worker port `8080` is internal                      | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |
 
 Infra (ECR, ALB, ECS, RDS, SQS, Lambda sandbox, Secrets Manager) is managed with Terraform under [infra/](./infra/) — see [infra/README.md](./infra/README.md) for create, migrate, deploy, and destroy.
 

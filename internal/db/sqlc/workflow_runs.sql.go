@@ -62,6 +62,26 @@ func (q *Queries) DeleteRunNodeJobOutbox(ctx context.Context, id uuid.UUID) erro
 	return err
 }
 
+const failWorkflowRun = `-- name: FailWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'failed',
+    error = jsonb_build_object('message', $1::text),
+    failed_at = now(),
+    current_node_attempt = current_node_attempt + 1
+WHERE id = $2
+`
+
+type FailWorkflowRunParams struct {
+	ErrorMessage string    `json:"error_message"`
+	ID           uuid.UUID `json:"id"`
+}
+
+func (q *Queries) FailWorkflowRun(ctx context.Context, arg FailWorkflowRunParams) error {
+	_, err := q.db.Exec(ctx, failWorkflowRun, arg.ErrorMessage, arg.ID)
+	return err
+}
+
 const getPublishedWorkflowForStart = `-- name: GetPublishedWorkflowForStart :one
 SELECT
     w.id,

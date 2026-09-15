@@ -75,6 +75,15 @@ SET
     completed_at = now()
 WHERE id = sqlc.arg('id');
 
+-- name: FailWorkflowRun :exec
+UPDATE workflow_runs
+SET
+    status = 'failed',
+    error = jsonb_build_object('message', sqlc.arg('error_message')::text),
+    failed_at = now(),
+    current_node_attempt = current_node_attempt + 1
+WHERE id = sqlc.arg('id');
+
 -- name: LockDueRunNodeJobsOutbox :many
 SELECT
     o.id,
