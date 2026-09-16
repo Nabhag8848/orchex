@@ -48,8 +48,8 @@ variable "major_engine_version" {
 
 variable "instance_class" {
   type        = string
-  description = "RDS instance class (db.t4g.medium = 2 vCPU, 4 GiB)"
-  default     = "db.t4g.medium"
+  description = "RDS instance class (db.t3.medium = 2 vCPU, 4 GiB)"
+  default     = "db.t3.medium"
 }
 
 variable "allocated_storage" {

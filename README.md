@@ -22,7 +22,7 @@ cp .env.example .env
 
 `.env` is loaded by Compose and by the Makefile for host commands (`make migrate-*`, `make run`). The application reads the resulting process environment directly, so production can inject variables without any environment-specific code.
 `DATABASE_URL` uses `localhost` for the host; Compose rewrites it to the `postgres` service name inside the network.
-Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose defaults to `debug`; the application and Terraform defaults are `info`. Services emit JSON logs to stdout.
+Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose and Terraform default to `debug`; the application defaults to `info`. Services emit JSON logs to stdout.
 
 ### 2. Start the stack
 
@@ -116,6 +116,14 @@ Workflows live in the `public.workflows` table. Seed local samples that hit **pu
 ```bash
 make seed-local
 ```
+
+To seed three valid drafts and three published examples in production after applying migrations:
+
+```bash
+BUILDER_URL="http://YOUR_ALB_HOST" make seed-production
+```
+
+This skips invalid and archived fixtures. It prints execution commands without running workflows; reruns create additional records.
 
 Then:
 
@@ -211,7 +219,7 @@ make sqlc
 | **Database**    | `postgres:17-alpine` in Compose                                                                                      | Amazon RDS for PostgreSQL 17                                                                                               |
 | **Queue**       | ElasticMQ (`softwaremill/elasticmq-native`) on host port `9324`, queue `orchex-node-jobs`                            | AWS SQS `orchex-node-jobs` + DLQ (14-day retention, DLQ after 5 receives)                                                  |
 | **Function JS** | SAM local (`make sam-local`) → `orchex-function-sandbox`; worker uses `LAMBDA_ENDPOINT_URL` + `FUNCTION_SANDBOX_ARN` | Shared zip Lambda `orchex-function-sandbox` (`nodejs24.x`); worker sync `Invoke` (`FUNCTION_SANDBOX_ARN` from Terraform)   |
-| **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM; `LOG_LEVEL=debug`) | Terraform task definition + task role ([infra/](./infra/)); `LOG_LEVEL=info`; injected environment variables are used directly |
+| **Config**      | Make and Compose load `.env` (dummy keys; `AWS_ENDPOINT_URL` → ElasticMQ; `LAMBDA_ENDPOINT_URL` → SAM; `LOG_LEVEL=debug`) | Terraform task definition + task role ([infra/](./infra/)); `LOG_LEVEL=debug`; injected environment variables are used directly |
 | **Migrations**  | goose one-shot `migrate` service on compose up                                                                       | `aws ecs run-task` on `orchex-db-migrate` (see [infra/README.md](./infra/README.md#run-database-migrations))               |
 | **TLS to DB**   | `sslmode=disable`                                                                                                    | `sslmode=require` (via `orchex/DATABASE_URL` secret)                                                                       |
 | **Networking**  | localhost ports `5432` / `8080` / `8081` / `9324` / `3001` (SAM); worker port `8080` is internal                      | ALB path rules → APIs; worker is internal (no ALB); ECS talks to RDS, SQS, and Lambda in AWS                               |

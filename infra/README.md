@@ -335,7 +335,7 @@ ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATA
 ### `modules/rds`
 
 - Wraps [terraform-aws-modules/rds/aws](https://registry.terraform.io/modules/terraform-aws-modules/rds/aws) v7.2.1.
-- **PostgreSQL 17** on `db.t4g.medium` (2 vCPU, 4 GiB RAM).
+- **PostgreSQL 17** on `db.t3.medium` (2 vCPU, 4 GiB RAM).
 - **20 GiB** `gp3` storage (RDS minimum for gp3 Postgres).
 - **Single-AZ**, no automated backups (`backup_retention_period = 0`).
 - **`publicly_accessible = false`** — no public IP; not reachable from the internet.

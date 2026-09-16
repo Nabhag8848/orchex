@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
-# Local-only seed against builder-api. Does not run in production or Docker builds.
+# Seed against builder-api. Pass --production for valid production examples only.
 # Requires: compose (or make run) with builder-api healthy, jq, uuidgen.
 #
 # Workflows call public APIs (no API keys): httpbin.org, open-meteo.com,
 # jsonplaceholder.typicode.com. Every non-empty graph uses all five node types
 # (start, function, conditional, api, response) with valid config_schema values.
 set -euo pipefail
+
+PRODUCTION=false
+case "${1:-}" in
+  --production) PRODUCTION=true; shift ;;
+  "") ;;
+  *) echo "Usage: $0 [--production]" >&2; exit 1 ;;
+esac
+if [[ $# -ne 0 ]]; then
+  echo "Usage: $0 [--production]" >&2
+  exit 1
+fi
+
+if [[ "$PRODUCTION" == true ]]; then
+  : "${BUILDER_URL:?Set BUILDER_URL to the production builder URL}"
+  EXECUTION_URL="${EXECUTION_URL:-$BUILDER_URL}"
+fi
 
 BASE="${BUILDER_URL:-http://localhost:${HTTP_PORT:-8080}}"
 EXEC="${EXECUTION_URL:-http://localhost:${EXECUTION_HTTP_PORT:-8081}}"
@@ -20,6 +36,12 @@ need() {
 need curl
 need jq
 need uuidgen
+
+if [[ "$PRODUCTION" == true ]]; then
+  echo "Checking production builder health at $BASE"
+  curl -fsS --max-time 15 "$BASE/health/builder" >/dev/null
+  echo "Creating six sample workflows; reruns create additional records."
+fi
 
 uuid() {
   uuidgen | tr '[:upper:]' '[:lower:]'
@@ -501,10 +523,13 @@ graph_bad_api_config_json() {
 echo "seeding public-API workflows against $BASE"
 echo
 
-w_empty="$(create \
-  "Untitled automation" \
-  "Blank draft — no nodes yet." | jq -r .id)"
-echo "untitled (empty)                 $w_empty"
+if [[ "$PRODUCTION" == false ]]; then
+  w_empty="$(create \
+    "Untitled automation" \
+    "Blank draft — no nodes yet." | jq -r .id)"
+  echo "untitled (empty)                 $w_empty"
+
+fi
 
 w_order="$(create \
   "High-value order -> httpbin notify" \
@@ -531,21 +556,24 @@ put_graph "$w_posts" "$(graph_jsonplaceholder_json \
   "Validate title/body then POST https://jsonplaceholder.typicode.com/posts.")" >/dev/null
 echo "jsonplaceholder (draft)          $w_posts"
 
-w_incomplete="$(create \
-  "High-value order (missing low-value path)" \
-  "Same httpbin flow but Conditional has no false edge — publish must fail." | jq -r .id)"
-put_graph "$w_incomplete" "$(graph_order_notify_json \
-  "High-value order (missing low-value path)" \
-  "Same httpbin flow but Conditional has no false edge — publish must fail." \
-  no)" >/dev/null
-echo "order notify (incomplete graph)  $w_incomplete"
+if [[ "$PRODUCTION" == false ]]; then
+  w_incomplete="$(create \
+    "High-value order (missing low-value path)" \
+    "Same httpbin flow but Conditional has no false edge — publish must fail." | jq -r .id)"
+  put_graph "$w_incomplete" "$(graph_order_notify_json \
+    "High-value order (missing low-value path)" \
+    "Same httpbin flow but Conditional has no false edge — publish must fail." \
+    no)" >/dev/null
+  echo "order notify (incomplete graph)  $w_incomplete"
 
-w_bad_cfg="$(create \
-  "Forward webhook to partner" \
-  "All node types present; API config empty to prove config_schema rejection." | jq -r .id)"
-echo "checking config_schema ..."
-put_expect_400 "$w_bad_cfg" "$(graph_bad_api_config_json "Forward webhook to partner")" "empty partner API config"
-echo "partner forward (bad cfg)        $w_bad_cfg  (left empty; bad PUT rejected)"
+  w_bad_cfg="$(create \
+    "Forward webhook to partner" \
+    "All node types present; API config empty to prove config_schema rejection." | jq -r .id)"
+  echo "checking config_schema ..."
+  put_expect_400 "$w_bad_cfg" "$(graph_bad_api_config_json "Forward webhook to partner")" "empty partner API config"
+  echo "partner forward (bad cfg)        $w_bad_cfg  (left empty; bad PUT rejected)"
+
+fi
 
 w_live="$(create \
   "High-value order -> httpbin notify" \
@@ -575,11 +603,14 @@ put_graph "$w_posts_live" "$(graph_jsonplaceholder_json \
 curl -fsS -X POST "$BASE/v1/workflows/$w_posts_live/publish" >/dev/null
 echo "jsonplaceholder (published)       $w_posts_live"
 
-w_archived="$(create \
-  "Old httpbin ping (retired)" \
-  "Retired smoke workflow against httpbin — archived." | jq -r .id)"
-curl -fsS -X DELETE "$BASE/v1/workflows/$w_archived" >/dev/null
-echo "httpbin ping (archived)          $w_archived  (omitted from list)"
+if [[ "$PRODUCTION" == false ]]; then
+  w_archived="$(create \
+    "Old httpbin ping (retired)" \
+    "Retired smoke workflow against httpbin — archived." | jq -r .id)"
+  curl -fsS -X DELETE "$BASE/v1/workflows/$w_archived" >/dev/null
+  echo "httpbin ping (archived)          $w_archived  (omitted from list)"
+
+fi
 
 echo
 echo "-- builder curls --"
@@ -614,23 +645,29 @@ printf '%s\n' \
   "  -H 'Content-Type: application/json' \\" \
   "  -d $(jq -c -n --argjson b "$weather_body" '$b | @json') | jq '.graph.nodes[] | {name, config}'"
 echo
-echo "# bad API config must 400"
-bad_body="$(graph_bad_api_config_json "Forward webhook to partner")"
-printf '%s\n' \
-  "curl -i -sS -X PUT $BASE/v1/workflows/$w_bad_cfg \\" \
-  "  -H 'Content-Type: application/json' \\" \
-  "  -d $(jq -c -n --argjson b "$bad_body" '$b | @json')"
-echo
+if [[ "$PRODUCTION" == false ]]; then
+  echo "# bad API config must 400"
+  bad_body="$(graph_bad_api_config_json "Forward webhook to partner")"
+  printf '%s\n' \
+    "curl -i -sS -X PUT $BASE/v1/workflows/$w_bad_cfg \\" \
+    "  -H 'Content-Type: application/json' \\" \
+    "  -d $(jq -c -n --argjson b "$bad_body" '$b | @json')"
+  echo
+fi
+
 echo "# publish order draft"
 echo "curl -i -sS -X POST $BASE/v1/workflows/$w_order/publish"
 echo
-echo "# publish should fail: empty / missing false branch"
-echo "curl -i -sS -X POST $BASE/v1/workflows/$w_empty/publish"
-echo "curl -i -sS -X POST $BASE/v1/workflows/$w_incomplete/publish"
-echo
-echo "# archive bad-config draft"
-echo "curl -i -sS -X DELETE $BASE/v1/workflows/$w_bad_cfg"
-echo
+if [[ "$PRODUCTION" == false ]]; then
+  echo "# publish should fail: empty / missing false branch"
+  echo "curl -i -sS -X POST $BASE/v1/workflows/$w_empty/publish"
+  echo "curl -i -sS -X POST $BASE/v1/workflows/$w_incomplete/publish"
+  echo
+  echo "# archive bad-config draft"
+  echo "curl -i -sS -X DELETE $BASE/v1/workflows/$w_bad_cfg"
+  echo
+fi
+
 echo "-- sample run payloads (execution) --"
 order_hi="$(jq -c -n --arg id "$w_live" '{workflow_id:$id,payload:{order_id:"ord_9001",email:"buyer@example.com",amount_cents:14999,currency:"usd"}}')"
 order_lo="$(jq -c -n --arg id "$w_live" '{workflow_id:$id,payload:{order_id:"ord_22",email:"buyer@example.com",amount_cents:2500,currency:"usd"}}')"

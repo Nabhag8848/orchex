@@ -1,4 +1,4 @@
-.PHONY: sqlc migrate-up migrate-down migrate-status run run-execution run-worker test compose-up compose-down compose-logs compose-ps seed-local sam-local
+.PHONY: sqlc migrate-up migrate-down migrate-status run run-execution run-worker test compose-up compose-down compose-logs compose-ps seed-local seed-prod seed-production sam-local
 
 # Host-side targets (migrate-*, run) read DATABASE_URL from .env.
 # Compose loads .env via env_file; Make does not unless we export it here.
@@ -52,3 +52,9 @@ compose-ps:
 # Local builder-api only. Creates draft / publishable / published / archived workflows.
 seed-local:
 	./scripts/seed-local-workflows.sh
+
+# Production ALB. Creates three valid drafts and three published workflows.
+seed-prod:
+	bash scripts/seed-local-workflows.sh --production
+
+seed-production: seed-prod
