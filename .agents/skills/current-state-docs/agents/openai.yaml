@@ -1,0 +1,4 @@
+interface:
+  display_name: "Current-State Docs"
+  short_description: "Keep README and Markdown claims aligned with the repository"
+  default_prompt: "Write or update this Markdown so it accurately reflects the repository's current implemented state."

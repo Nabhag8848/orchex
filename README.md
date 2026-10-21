@@ -1,8 +1,8 @@
 # Orchex
 
-**A durable workflow orchestration + execution engine — we own both**
+**A durable workflow orchestration and execution engine.**
 
-Build a graph. Publish an immutable version. Run it reliably. Resume exactly where it failed.
+Build a graph, publish an immutable version, run it reliably, and resume at the failed node.
 
 Design decisions, schemas, benches, and learning notes live in [docs/](./docs/).
 
@@ -20,9 +20,7 @@ Design decisions, schemas, benches, and learning notes live in [docs/](./docs/).
 cp .env.example .env
 ```
 
-`.env` is loaded by Compose and by the Makefile for host commands (`make migrate-*`, `make run`). The application reads the resulting process environment directly, so production can inject variables without any environment-specific code.
-`DATABASE_URL` uses `localhost` for the host; Compose rewrites it to the `postgres` service name inside the network.
-Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose and Terraform default to `debug`; the application defaults to `info`. Services emit JSON logs to stdout.
+Compose and host-side Make commands (`make migrate-*`, `make run`) load `.env`; production injects the same variables directly. `DATABASE_URL` uses `localhost` on the host and Compose rewrites it to `postgres` inside its network. Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose and Terraform default to `debug`, the application to `info`; services emit JSON logs to stdout.
 
 ### 2. Start the stack
 
@@ -30,7 +28,7 @@ Set `LOG_LEVEL` to `debug`, `info`, `warn`, or `error`. Compose and Terraform de
 make compose-up
 ```
 
-This starts:
+This starts the following services:
 
 1. **postgres** — PostgreSQL 17 (`postgres:17-alpine`)
 2. **migrate** — goose applies `db/migrations`
@@ -68,9 +66,7 @@ docker compose ps execution-worker
 docker compose logs -f execution-worker
 ```
 
-All replicas consume the same SQS queue. These commands use the existing image; add `--build` to rebuild after code changes. After removing the stack with `make compose-down`, include the desired `--scale` value when starting it again.
-
-The worker has no fixed host port, so replicas can run together without port conflicts. Each container checks its own `/health/worker` endpoint on internal port `8080`.
+All replicas consume the same SQS queue. These commands reuse the existing image; add `--build` after code changes. Include the desired `--scale` value when restarting after `make compose-down`. Workers have no fixed host port, so replicas do not conflict; each checks `/health/worker` on internal port `8080`.
 
 
 ### 3. Smoke check
@@ -101,13 +97,7 @@ Dummy AWS keys in `.env` (`test` / `test`) are enough for ElasticMQ.
 
 ### SQS relay
 
-The execution API runs an in-process relay. Every second it reads due rows from
-`run_node_jobs_outbox`, locks them with `FOR UPDATE SKIP LOCKED`, and sends jobs
-for `pending` and `running` runs to SQS. Each message contains `run_id`,
-`workflow_version_id`, `node_id`, and `attempt`. A successfully sent row is
-deleted; rows for paused, cancelled, completed, or failed runs are deleted
-without being sent. If sending fails, the database transaction rolls back and
-the row is retried on a later tick.
+The execution API runs an in-process relay every second. It locks due `run_node_jobs_outbox` rows with `FOR UPDATE SKIP LOCKED` and sends jobs for `pending` and `running` runs to SQS. Each message contains `run_id`, `workflow_version_id`, `node_id`, and `attempt`. Sent rows are deleted; rows for paused, cancelled, completed, or failed runs are deleted without sending. A send failure rolls back the transaction so a later tick retries the row.
 
 Override the execution host port with `EXECUTION_HTTP_PORT` in `.env` (default `8081`). The Compose worker does not publish a host port.
 
@@ -155,7 +145,7 @@ RUN_ID="$(curl -sS -X POST http://localhost:8081/v1/runs \
 curl -sS "http://localhost:8081/v1/runs/$RUN_ID" | jq
 ```
 
-Starting a run creates it as `pending`, records `started_at`, and writes the Start node job to the outbox in the same transaction. The relay sends that job to SQS; the worker processes one node hop at a time, persists its output, and writes the next node job to the outbox. A Response node marks the run `completed` and sets `completed_at`.
+Starting a run creates it as `pending`, records `started_at`, and writes the Start job to the outbox in the same transaction. The relay sends it to SQS; the worker processes one hop, persists its output, and writes the next job to the outbox. A Response node marks the run `completed` and sets `completed_at`.
 
 The current worker executes these node types:
 
@@ -167,7 +157,7 @@ The current worker executes these node types:
 | `api` | Makes the configured HTTP request and stores response status, headers, and body as output. |
 | `response` | Produces the final response output and completes the workflow run. |
 
-For API and Response nodes, `body_template` is the base object. Fields from the previous output's `data` object are merged on top, so received data wins when both contain the same top-level field. Node configuration contracts live in [`docs/node-type-schemas/`](./docs/node-type-schemas/).
+For API and Response nodes, `body_template` is the base object. Fields from the previous output's `data` object overlay it, so received data wins on matching top-level fields. Node configuration contracts live in [`docs/node-type-schemas/`](./docs/node-type-schemas/).
 
 ### Worker debug trace
 
@@ -177,7 +167,7 @@ Compose defaults to `LOG_LEVEL=debug`. Follow the worker while running a seeded 
 docker compose logs -f --tail=0 execution-worker
 ```
 
-Each hop logs the run and node IDs, node type, executor input, executor output, selected edge, outbox enqueue, and final completion. These payload-level events are `debug` only; ECS runs at `info` by default. Do not enable `debug` in production for workflows containing sensitive payload data.
+Each hop logs run and node IDs, node type, executor input and output, selected edge, outbox enqueue, and completion. These payload-level events are `debug` only; ECS defaults to `info`. Do not enable `debug` for production workflows with sensitive payloads.
 
 ### Optional: API on the host
 

@@ -1,6 +1,6 @@
 # Postgres OLTP bench (Docker + pgbench)
 
-Local harness to load-test the Orchex schema with an Orchex-shaped write mix.
+Local harness that load-tests the Orchex schema with an Orchex-shaped write mix.
 
 ## Assumptions
 
@@ -23,4 +23,4 @@ Report: `docs/bench/postgres/results/BENCHMARK_RESULTS.md`
 
 ## Note
 
-This does **not** prove a specific RDS/Aurora instance size. It proves Postgres can run this SQL mix at a given TPS on a **2 CPU / 4GB Docker cap**.
+This does **not** prove a specific RDS/Aurora size. It measures this SQL mix at a given TPS under a **2 CPU / 4 GB Docker cap**.

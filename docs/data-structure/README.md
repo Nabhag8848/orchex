@@ -1,6 +1,6 @@
 # Graph & Workflow Data Structures
 
-Hands-on Go implementations and notes for building Orchex workflow graphs — from basic DSA concepts to workflow validation.
+Hands-on Go implementations and notes that progress from graph basics to Orchex workflow validation.
 
 ## Run
 
@@ -16,7 +16,7 @@ From the repo root:
 go run ./docs/data-structure/
 ```
 
-Do **not** run `main.go` alone — `Graph` and `WorkflowGraph` live in separate files in the same `package main`.
+Do **not** run `main.go` alone: `Graph` and `WorkflowGraph` are separate files in the same `package main`.
 
 ## Files
 
@@ -44,7 +44,7 @@ We store it as a **directed adjacency list**:
 adj map[string]map[string]struct{}
 ```
 
-Each key is a node; its value is the set of outgoing neighbors. Using `map[string]struct{}` gives **O(1)** average edge lookup (set semantics, no duplicates).
+Each key is a node and its value is its outgoing-neighbor set. `map[string]struct{}` provides **O(1)** average edge lookup and prevents duplicates.
 
 | Operation             | Time           | Space        |
 | --------------------- | -------------- | ------------ |
@@ -53,7 +53,7 @@ Each key is a node; its value is the set of outgoing neighbors. Using `map[strin
 | List neighbors of `u` | O(out-degree)  | —            |
 | Overall storage       | —              | **O(n + m)** |
 
-**Key gotcha:** `AddEdge` creates its endpoints, but an **isolated node** (no edges yet) must be added with `AddNode` explicitly.
+**Key gotcha:** `AddEdge` creates endpoints, but an **isolated node** still requires `AddNode`.
 
 **Graph vs tree:** A general graph has **no root**. Trees are a special case where you pick one entry point.
 
@@ -163,7 +163,7 @@ w.AddDirectedEdge("a", "b")  // works — same as w.Graph.AddDirectedEdge(...)
 w.BFS("a", "b")              // promoted from *Graph
 ```
 
-This is **composition**, not classical inheritance — `WorkflowGraph` is not a `*Graph` for type assignment.
+This is **composition**. `WorkflowGraph` cannot be assigned as a `*Graph`.
 
 **Keep graph and metadata in sync:**
 
@@ -256,7 +256,7 @@ Peel Start → API in: 1→0 → peel API → Response in: 1→0 → peel Respon
 Removed 3/3 → DAG
 ```
 
-**Why decrementing in-degree works:** Each `in[v]--` means “one more dependency of `v` just finished.” That’s exactly what the scheduler needs to know.
+**Why decrementing works:** Each `in[v]--` records one completed dependency of `v`.
 
 **Workflow reading:** “Can the scheduler ever make progress? If nothing has in-degree 0, everyone is waiting on each other.”
 
@@ -269,7 +269,7 @@ Removed 3/3 → DAG
 | Also gives topo order   | No (needs extra step)            | Yes (peel order)            |
 | Uses cached `inDegrees` | No                               | Yes (copied, not mutated)   |
 
-For Orchex **publish validation**, either is correct. Kahn is a natural fit when you also need **execution order** (topological sort — see §9).
+Either algorithm works for Orchex **publish validation**. Kahn also produces an **execution order**; see §9.
 
 ---
 

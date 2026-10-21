@@ -6,14 +6,12 @@ Build a graph. Publish an immutable version. Run it reliably. Resume exactly whe
 
 ---
 
-Orchex is a workflow execution engine. A user draws a flow, publishes it, and asks us to run it reliably.
+Orchex lets users draw, publish, and reliably run workflows. This design answers the hard parts: incomplete drafts, version pinning, failure recovery, and growth from a few runs to one million daily.
 
-That sounds simple until the first practical questions arrive. What happens while a user is halfway through drawing an invalid graph? Which version should a run use if the workflow is edited while it is running? If one API call fails after three successful steps, do we start everything again? And how do we keep this understandable when the system grows from a handful of runs to a million a day?
-
-This document tells the story of the design as a conversation between an interviewer and a candidate. It is intentionally separated into functional requirements, non-functional requirements, high-level design, API design, schema design, and deep dives — with more still open in [section 11](#11-deep-dives-still-to-come).
+It uses question-oriented sections covering requirements, architecture, APIs, schema, and deep dives. Open decisions remain in [section 11](#11-deep-dives-still-to-come).
 
 > [!IMPORTANT]
-> [orchex.excalidraw](./orchex.excalidraw) is the source of truth for architecture, API, schema, the execution deep dive, the queue-product decision, the OLTP/RDS decision, the graph data-structure board, the control-plane compute decision, and the Function-node isolation decision. [schema.dbml](./schema.dbml) defines the PostgreSQL model, [bench/postgres](./bench/postgres) holds the OLTP capacity harness behind the RDS decision, [node-type-schemas](./node-type-schemas) contains the executable node contracts, and [data-structure](./data-structure) contains the graph experiments that informed the design.
+> [orchex.excalidraw](./orchex.excalidraw) is the source of truth for architecture, APIs, schema, execution, queue selection, OLTP/RDS, graph structure, control-plane compute, and Function isolation. [schema.dbml](./schema.dbml) defines the PostgreSQL model. [bench/postgres](./bench/postgres) contains the OLTP capacity harness. [node-type-schemas](./node-type-schemas) contains executable node contracts. [data-structure](./data-structure) contains the graph experiments behind the design.
 
 ### At a glance
 
@@ -48,9 +46,7 @@ This document tells the story of the design as a conversation between an intervi
 
 ### What are we building?
 
-**Interviewer:** What is Orchex, and where do we draw the product boundary?
-
-**Candidate:** We are building a workflow product, not a thin UI over somebody else's orchestrator. Orchex therefore owns:
+We are building a workflow product, not a thin UI over somebody else's orchestrator. Orchex therefore owns:
 
 - workflow definitions and versioning;
 - graph validation;
@@ -61,34 +57,26 @@ This document tells the story of the design as a conversation between an intervi
 
 ### How is a workflow triggered?
 
-**Interviewer:** Should a workflow start through a webhook, a schedule, or a manual action?
-
-**Candidate:** For v1, a workflow starts manually. Webhooks and schedules are represented in the underlying trigger model so we can add them later, but they are not exposed by the current API.
+v1 starts workflows manually. The trigger model reserves webhooks and schedules, but the API does not expose them.
 
 ### How do integrations work?
 
-**Interviewer:** Are we also building the integration catalog and credential system?
-
-**Candidate:** Not in v1. Provider catalogs, OAuth, and credentials are out of scope. Workflows that need an HTTP call use the General API node. An Integration Action node can be added later through the schema-driven catalog without changing the identity model.
+v1 excludes provider catalogs, OAuth, and credentials. HTTP calls use the General API node. The schema-driven catalog can add Integration Action nodes without changing the identity model.
 
 ### What does a workflow look like?
 
-**Interviewer:** We have nodes and edges, but what rules turn that graph into a valid workflow?
+The builder stores nodes and directed edges. An edge `A -> B` means that B may run after A. The graph must be a DAG: directed, with no cycles.
 
-**Candidate:** The builder stores nodes and directed edges. An edge `A -> B` means that B may run after A. The graph must be a DAG: directed, with no cycles.
-
-We deliberately validate in two stages:
+Validation has two stages:
 
 1. **Save is forgiving.** A draft is work in progress. It may be disconnected or incomplete while somebody is drawing it.
 2. **Publish is strict.** A published workflow must be non-empty, have exactly one Start, be fully reachable from that Start, be acyclic, satisfy degree rules for every node type, and use the correct edge labels (`true`/`false` on Conditional, `default` elsewhere).
 
-This separation matters. If every save required a runnable graph, the builder would fight the user. If publish accepted an unfinished graph, the execution engine would inherit a problem it cannot safely solve.
+Strict save validation would block editing. Permissive publish validation would pass an unsafe graph to execution.
 
 ### Which nodes do we support?
 
-**Interviewer:** Which node types are in v1, and how may they connect?
-
-**Candidate:** We support five node types:
+We support five node types:
 
 | Node            | Role                              | In  | Out |
 | --------------- | --------------------------------- | --- | --- |
@@ -100,27 +88,23 @@ This separation matters. If every save required a runnable graph, the builder wo
 
 Normal edges use the label `default`. The two outgoing edges of a Conditional use `true` and `false`. The database enforces one edge per `(workflow version, source node, label)`, which also prevents two `true` branches from the same Conditional.
 
-Those degree rules also mean v1 has no merge points. After a Conditional branches, each path continues independently; nothing may rejoin with fan-in greater than one. That keeps scheduling and resume simple for now. Join semantics can come later with an explicit node type rather than as a silent graph exception.
+These rules also exclude merge points in v1. After a Conditional branch, paths remain independent because fan-in cannot exceed one. An explicit node type can add join semantics later.
 
 Agent, Router, Scheduler, and Integration Action nodes are intentionally deferred. The schema-driven node catalog lets us add them without changing the identity model.
 
 ### Why a DAG
 
-**Interviewer:** Why disallow cycles instead of supporting loops immediately?
+A DAG gives a finite execution path and valid topological order. A worker can execute a node, store a checkpoint, and schedule its successor. Cycles need iteration limits, repeated state, and more complex retry rules, so they remain a separate feature.
 
-**Candidate:** A DAG gives us a finite execution path and a valid topological order. More importantly, it keeps v1 recovery understandable: a worker executes a node, stores a checkpoint, and schedules the next node. A cycle would turn that into loop semantics—iteration limits, repeated state, and more complicated retry rules—which is a separate feature rather than a small extension.
-
-How we represent that graph in memory, check degrees, detect cycles, and derive an execution order is covered in the [graph data-structure deep dive](#8-deep-dive-design-graph-data-structure). The Go sketches in [data-structure](./data-structure) are the learning notes behind that board. Publish hard-validation uses those same ideas: exactly one Start, reachability from Start, degree bounds, edge labels, and Kahn cycle detection.
+The [graph data-structure deep dive](#8-deep-dive-design-graph-data-structure) covers graph representation, degree checks, cycle detection, and execution order. The [data-structure](./data-structure) Go sketches underpin publish validation: one Start, reachability, degree bounds, edge labels, and Kahn cycle detection.
 
 ### How does draft and publish work?
 
-**Interviewer:** What happens when someone edits a workflow that is already live?
-
-**Candidate:** The most important versioning decision is that “what I am editing” and “what is live” are not always the same thing.
+The editable version and the live version can differ.
 
 Creating a workflow atomically creates the workflow and an empty draft version 1. While that version is a draft, saves update it in place. Once published, it becomes immutable.
 
-If a user edits again after publishing, the next full `PUT` becomes a new draft version. We do not deep-copy the published graph and then apply a patch: the client already sends the complete graph, so that request is the new snapshot.
+After publishing, the next full `PUT` creates a draft version. The client supplies the complete graph, so the request itself is the new snapshot.
 
 Two pointers on `workflows` make this explicit:
 
@@ -135,7 +119,7 @@ The workflow status describes its wider lifecycle:
 - `published`: it has been published at least once, even if a newer draft now exists;
 - `archived`: it has been soft-deleted.
 
-Archiving removes a workflow from normal retrieval and prevents future edits or publishes. There is no unarchive API in v1. Existing runs are different: each run is pinned to a published version, so publishing something newer or archiving the workflow does not rewrite history underneath it.
+Archiving removes a workflow from normal retrieval and prevents edits or publishing. v1 has no unarchive API. Existing runs stay pinned to their published version, so later publishing or archiving cannot rewrite their history.
 
 ```mermaid
 stateDiagram-v2
@@ -156,43 +140,31 @@ stateDiagram-v2
 
 ### How do failures recover?
 
-**Interviewer:** If the fourth node fails after three successful nodes, do we roll back everything?
-
-**Candidate:** No. External actions cannot always be reversed, so full transactional rollback would promise something we cannot reliably deliver. We checkpoint the current node, keep the structured error, and retry that same node in the same run. Atomic whole-workflow rollback is deferred.
+No. External actions cannot always be reversed, so full transactional rollback would promise something we cannot reliably deliver. We checkpoint the current node, keep the structured error, and retry that same node in the same run. Atomic whole-workflow rollback is deferred.
 
 ### How are node failures presented?
 
-**Interviewer:** What happens when a Conditional receives bad data, a Function throws, or an API times out or returns non-2xx?
-
-**Candidate:** Every executor fails through a structured node-specific error envelope. It gives the UI a stable error class, code, user-facing message, retryability, and optional remediation details. The run stores that error together with the failing node ID so recovery is explicit rather than hidden in logs.
+Every executor returns a structured, node-specific error envelope: a stable class, code, user-facing message, retryability, and optional remediation. The run stores it with the failing node ID.
 
 ### What execution controls do users need?
 
-**Interviewer:** Can a running workflow be controlled?
-
-**Candidate:** Yes. A run can be paused, resumed, stopped, or retried, subject to its current state. Pause is soft and v1's pause API only flips run status when the run is `pending` or `running` — it does not interrupt a worker mid-node. An in-flight node may still finish (and can even land `completed` if it was the last hop); jobs still sitting in the outbox or SQS respect `paused` and do not continue. Stop moves the run to terminal `cancelled`. Retry is only for `failed` runs and continues from `current_node_id`. Details and the accepted edge cases live under [Pause](#pause).
+Runs can be paused, resumed, stopped, or retried according to their state. Pause is soft: the API changes only `pending` or `running` status and never interrupts a worker mid-node. An in-flight last hop can still complete; jobs in the outbox or SQS respect `paused`. Stop sets terminal `cancelled`. Retry applies only to `failed` runs and resumes at `current_node_id`. See [Pause](#pause) for edge cases.
 
 ### What do we expose for observability?
 
-**Interviewer:** Do we need full node-level traces from day one?
-
-**Candidate:** We start with workflow-level run state and logs. Detailed node-level traces and long-term analytics come later through ClickHouse. This keeps the operational path small while preserving a clear place to add deeper observability.
+v1 provides workflow-level run state and logs. ClickHouse can later add node traces and long-term analytics.
 
 ## 2. Non-Functional Requirements
 
 ### Reliability
 
-**Interviewer:** What reliability guarantee matters most in v1?
-
-**Candidate:** A failed run must be restartable from its checkpoint without replaying successful nodes. Runs are pinned to an immutable published version so later edits cannot change an execution already in progress.
+A failed run must be restartable from its checkpoint without replaying successful nodes. Runs are pinned to an immutable published version so later edits cannot change an execution already in progress.
 
 Checkpointing and enqueueing the next node are made atomic through a transactional outbox — settled in the [execution deep dive](#6-deep-dive-design-execution). The previous hop’s output lives on `workflow_runs.last_output` so resume and retry reuse the same input without storing every node’s history.
 
 ### Scale
 
-**Interviewer:** What scale are we designing for?
-
-**Candidate:** The initial assumptions are:
+The initial assumptions are:
 
 - 100,000 workflows;
 - 1 million runs per day;
@@ -204,31 +176,23 @@ Checkpointing and enqueueing the next node are made atomic through a transaction
 
 ### Data and consistency
 
-**Interviewer:** This sounds write-heavy. Where does the data go, and do all reads need immediate consistency?
-
-**Candidate:** PostgreSQL on Amazon RDS is the OLTP source of truth for definitions, immutable published snapshots, checkpoints, and current run state — why that product, and why not the other common options, is settled in the [OLTP database deep dive](#7-deep-dive-design-oltp-database). ClickHouse is the planned OLAP store for historical logs, node traces, and analytics.
+PostgreSQL on Amazon RDS is the OLTP source of truth for definitions, immutable published snapshots, checkpoints, and current run state — why that product, and why not the other common options, is settled in the [OLTP database deep dive](#7-deep-dive-design-oltp-database). ClickHouse is the planned OLAP store for historical logs, node traces, and analytics.
 
 Execution checkpoints need strong correctness. Observability can be eventually consistent; a few milliseconds before a trace appears is acceptable.
 
 ### Security and isolation
 
-**Interviewer:** Users can write Function nodes. Do those run inside our workers?
-
-**Candidate:** No. Untrusted JavaScript runs in an isolated Lambda sandbox. The worker owns orchestration, while the sandbox only executes code. In short: rent isolation, not the brain. How we store source, why we do not create a Lambda per Function node, and how the shared sandbox scales is discussed in the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
+No. Untrusted JavaScript runs in an isolated Lambda sandbox. The worker owns orchestration, while the sandbox only executes code. In short: rent isolation, not the brain. How we store source, why we do not create a Lambda per Function node, and how the shared sandbox scales is discussed in the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
 
 ### Extensibility
 
-**Interviewer:** Are we locking the system to these five nodes and manual triggers?
-
-**Candidate:** No. Node behavior is schema-driven, and the trigger enum already leaves room for webhooks and schedules. We are keeping the v1 surface small without baking those limitations into the core model.
+No. Node behavior is schema-driven, and the trigger enum already leaves room for webhooks and schedules. We are keeping the v1 surface small without baking those limitations into the core model.
 
 ## 3. High-Level Design
 
 ### Which architecture did we choose?
 
-**Interviewer:** Why not use SWF, Step Functions, or Temporal for the whole system?
-
-**Candidate:** They solve overlapping problems for different products.
+They solve overlapping problems for different products.
 
 - **Amazon SWF** is AWS’s older fully-managed state tracker: it stores execution history and coordinates decision/activity tasks, while your workers still run the real work. Fine for legacy or custom-worker setups; for new AWS-native work it is largely superseded by Step Functions.
 - **Step Functions** fits an AWS-native internal tool — you define a state machine and AWS runs and persists it.
@@ -263,9 +227,7 @@ flowchart LR
 
 ### How does one node execute?
 
-**Interviewer:** Walk me through a run.
-
-**Candidate:**
+**Walk me through a run.**
 
 1. Starting a run pins a published version, stores the Start checkpoint, and enqueues a node job.
 2. A worker receives the job and loads the run plus its pinned graph.
@@ -278,15 +240,11 @@ Queue jobs carry identity—primarily `run_id` and `node_id`—instead of becomi
 
 ### How are definition and execution traffic separated?
 
-**Interviewer:** Do workflow editing and workflow execution go through the same service?
-
-**Candidate:** They share the public load balancer but split by intent. The distributed Workflow Builder service handles create, retrieve, update, publish, and archive. The distributed Workflow Execution service handles start, retrieve run, pause, resume, stop, and retry. Each side can scale independently.
+They share the public load balancer but split by intent. The distributed Workflow Builder service handles create, retrieve, update, publish, and archive. The distributed Workflow Execution service handles start, retrieve run, pause, resume, stop, and retry. Each side can scale independently.
 
 ## 4. API Design
 
-**Interviewer:** What conventions apply to the whole API?
-
-**Candidate:** All routes use the `/v1` prefix. Authentication is assumed to be handled by middleware and is not part of these payloads.
+All routes use the `/v1` prefix. Authentication is assumed to be handled by middleware and is not part of these payloads.
 
 The API uses UTC ISO-8601 timestamps. IDs are UUIDs in storage; readable IDs below are examples only. Optimistic concurrency for workflow editing is deferred.
 
@@ -309,9 +267,7 @@ The API uses UTC ISO-8601 timestamps. IDs are UUIDs in storage; readable IDs bel
 
 ### Shared shapes
 
-**Interviewer:** Which objects appear repeatedly in the API?
-
-**Candidate:** The API is built around a Workflow, a versioned graph, and a Run.
+The API is built around a Workflow, a versioned graph, and a Run.
 
 #### Workflow
 
@@ -399,9 +355,7 @@ Run status is one of `pending`, `running`, `paused`, `failed`, `completed`, or `
 
 #### Create
 
-**Interviewer:** How do we create a workflow?
-
-**Candidate:** Creation accepts only workflow metadata. It creates the workflow row and an empty draft v1 atomically.
+Creation accepts only workflow metadata. It creates the workflow row and an empty draft v1 atomically.
 
 ```http
 POST /v1/workflows
@@ -436,9 +390,7 @@ POST /v1/workflows
 
 #### List
 
-**Interviewer:** Does the list endpoint return every graph?
-
-**Candidate:** No. It returns lightweight, non-archived summaries so the workflow list does not load complete node and edge snapshots.
+No. It returns lightweight, non-archived summaries so the workflow list does not load complete node and edge snapshots.
 
 ```http
 GET /v1/workflows
@@ -470,9 +422,7 @@ Archived workflows are excluded. This is a summary endpoint, so it does not retu
 
 #### Retrieve
 
-**Interviewer:** How does the client ask for the editable graph versus the live graph?
-
-**Candidate:** It selects `latest` or `published`; `latest` is the default.
+It selects `latest` or `published`; `latest` is the default.
 
 ```http
 GET /v1/workflows/:id
@@ -486,9 +436,7 @@ Requesting `published` before the first publish returns `404`. Archived workflow
 
 #### Update
 
-**Interviewer:** Do we patch individual graph operations?
-
-**Candidate:** No. Like n8n-style editors, the client sends the complete graph as the new truth.
+No. Like n8n-style editors, the client sends the complete graph as the new truth.
 
 ```http
 PUT /v1/workflows/:id
@@ -599,9 +547,7 @@ Validation failures return `400`. Missing or archived workflows return `404`/`41
 
 #### Publish
 
-**Interviewer:** What changes when a draft is published?
-
-**Candidate:** The editable head is hard-validated, marked immutable, and becomes the version used by new runs.
+The editable head is hard-validated, marked immutable, and becomes the version used by new runs.
 
 ```http
 POST /v1/workflows/:id/publish
@@ -648,9 +594,7 @@ Publishing a head that is already live is an idempotent `200` no-op. Validation 
 
 #### Archive
 
-**Interviewer:** Is delete destructive?
-
-**Candidate:** No. It is a soft archive. The definition becomes unavailable for normal workflow operations, while existing pinned runs may continue.
+No. It is a soft archive. The definition becomes unavailable for normal workflow operations, while existing pinned runs may continue.
 
 ```http
 DELETE /v1/workflows/:id
@@ -662,9 +606,7 @@ The response is `204 No Content`. This is a soft delete: status becomes `archive
 
 #### Start a run
 
-**Interviewer:** How does execution begin?
-
-**Candidate:** Start pins the latest published version and creates a `pending` run at that version's Start node. Publish already guarantees exactly one Start and full reachability from it, so the run can resolve `current_node_id` without an extra graph check.
+Start pins the latest published version and creates a `pending` run at that version's Start node. Publish already guarantees exactly one Start and full reachability from it, so the run can resolve `current_node_id` without an extra graph check.
 
 ```http
 POST /v1/runs
@@ -716,9 +658,7 @@ A workflow that is missing, archived, still a draft, or has never been published
 
 #### Retrieve a run
 
-**Interviewer:** Can terminal runs still be inspected?
-
-**Candidate:** Yes. Retrieve always returns the complete snapshot, including completed, failed, and cancelled runs.
+Yes. Retrieve always returns the complete snapshot, including completed, failed, and cancelled runs.
 
 ```http
 GET /v1/runs/:run_id
@@ -755,9 +695,7 @@ The response is `200 OK` with the complete Run snapshot. Runs remain readable in
 
 #### Pause
 
-**Interviewer:** What does pause mean if a node is already running?
-
-**Candidate:** Soft pause. The pause endpoint itself only checks status and flips the run to `paused` — it does not kill a worker or cancel an SQS message. What happens next depends on whether a worker is already executing the current node.
+Soft pause. The pause endpoint itself only checks status and flips the run to `paused` — it does not kill a worker or cancel an SQS message. What happens next depends on whether a worker is already executing the current node.
 
 ```http
 POST /v1/runs/:run_id/pause
@@ -783,9 +721,7 @@ No outbox delete, no SQS purge, no worker interrupt in the API handler. Soft pau
 
 So: pause is reliable for work that has not started on a worker; it is **best-effort** against an already-running node. The rare race — last node in flight when the client pauses — can end in `completed` rather than staying `paused`. That is deliberate for v1: status flip is cheap and correct enough; preempting an in-flight executor is not.
 
-**Interviewer:** Why not hard-cancel the in-flight node?
-
-**Candidate:** Hard interrupt needs cooperative cancellation in every executor (API, Function sandbox, …), lease/visibility gymnastics on SQS, and clear rules for partial side effects. Soft pause keeps the execution spine simple: checkpoint + outbox stay the source of truth; pause is a status gate on "schedule or run the next hop," not a distributed abort.
+Hard interrupt needs cooperative cancellation in every executor (API, Function sandbox, …), lease/visibility gymnastics on SQS, and clear rules for partial side effects. Soft pause keeps the execution spine simple: checkpoint + outbox stay the source of truth; pause is a status gate on "schedule or run the next hop," not a distributed abort.
 
 The `200 OK` response is the complete updated Run with `paused_at` set (status `paused` at response time — see the race above if a last hop is already executing).
 
@@ -818,9 +754,7 @@ The `200 OK` response is the complete updated Run with `paused_at` set (status `
 
 #### Resume
 
-**Interviewer:** Where does a paused run continue?
-
-**Candidate:** It continues in the same run from `current_node_id`.
+It continues in the same run from `current_node_id`.
 
 ```http
 POST /v1/runs/:run_id/resume
@@ -863,9 +797,7 @@ A failed run uses Retry, not Resume.
 
 #### Stop
 
-**Interviewer:** Can a stopped run be resumed later?
-
-**Candidate:** No. Stop produces terminal `cancelled`. It is intentionally different from Pause.
+No. Stop produces terminal `cancelled`. It is intentionally different from Pause.
 
 ```http
 POST /v1/runs/:run_id/stop
@@ -908,9 +840,7 @@ The response is the updated Run with `cancelled_at` set. Cancelled is terminal: 
 
 #### Retry
 
-**Interviewer:** Does retry create a new run or replay the graph?
-
-**Candidate:** Neither. It clears the failure and re-executes the checkpointed node in the same run.
+Neither. It clears the failure and re-executes the checkpointed node in the same run.
 
 ```http
 POST /v1/runs/:run_id/retry
@@ -973,9 +903,7 @@ stateDiagram-v2
 
 ### Worker-driven transitions
 
-**Interviewer:** Which state changes happen without an API call?
-
-**Candidate:** Workers make normal execution progress:
+Workers make normal execution progress:
 
 - `pending -> running` when a worker accepts the first job;
 - `running -> completed` after the terminal node succeeds;
@@ -985,26 +913,20 @@ stateDiagram-v2
 
 ### HTTP errors still to standardize
 
-**Interviewer:** Is the HTTP error contract final?
-
-**Candidate:** Not completely. The design fixes status meanings but does not yet define a shared HTTP error JSON body. It also leaves the final choice between `404` and `410` for archived workflows open. Those are API-contract tasks, not details an implementation should invent independently.
+Not completely. The design fixes status meanings but does not yet define a shared HTTP error JSON body. It also leaves the final choice between `404` and `410` for archived workflows open. Those are API-contract tasks, not details an implementation should invent independently.
 
 ## 5. Schema Design
 
 ### Why PostgreSQL and relational tables?
 
-**Interviewer:** A workflow is a graph, so why not put everything in one JSON document or a graph database?
-
-**Candidate:** The graph shape is important, but so are relational guarantees. A run must point to a real published version, an edge must not cross versions, and a checkpoint must belong to the exact graph the run pinned. PostgreSQL gives us those constraints while JSONB handles type-specific node configuration. Which Postgres _product_ we run (RDS vs Aurora vs the rest of the market) is decided in the [OLTP database deep dive](#7-deep-dive-design-oltp-database).
+The graph shape is important, but so are relational guarantees. A run must point to a real published version, an edge must not cross versions, and a checkpoint must belong to the exact graph the run pinned. PostgreSQL gives us those constraints while JSONB handles type-specific node configuration. Which Postgres _product_ we run (RDS vs Aurora vs the rest of the market) is decided in the [OLTP database deep dive](#7-deep-dive-design-oltp-database).
 
 > [!NOTE]
 > This section covers the baseline tables. Later deep dives extend the schema as decisions are made — the [execution deep dive](#6-deep-dive-design-execution) already adds an outbox table, a retry counter, and their integrity constraints, explained [with examples there](#what-this-deep-dive-changed-in-the-schema).
 
 ### How are node contracts represented?
 
-**Interviewer:** Different node types accept different configuration and runtime data. Do we hard-code every shape in each service?
-
-**Candidate:** No. Every node type owns four JSON Schema 2020-12 documents:
+No. Every node type owns four JSON Schema 2020-12 documents:
 
 - `config_schema`: what the builder stores for the node;
 - `input_schema`: what the executor accepts from upstream;
@@ -1015,15 +937,11 @@ The schemas live in [node-type-schemas](./node-type-schemas) and are seeded into
 
 For every node except Start input, runtime payloads use a top-level `data` field. Start accepts an empty input object with no properties; its output still uses `data.payload`.
 
-**Interviewer:** What does each v1 node contract require?
-
-**Candidate:** Each node keeps its own strict configuration, input, output, and error vocabulary.
+Each node keeps its own strict configuration, input, output, and error vocabulary.
 
 ### Start
 
-**Interviewer:** What begins the runtime data flow?
-
-**Candidate:** Start has no upstream runtime input and produces the trigger payload.
+Start has no upstream runtime input and produces the trigger payload.
 
 - Config: optional `description` of 1–512 characters.
 - Input: empty object (`additionalProperties: false`, no `data` field).
@@ -1033,9 +951,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 ### Conditional
 
-**Interviewer:** How is a branch selected?
-
-**Candidate:** Conditional evaluates a boolean expression and annotates the outgoing data with the selected branch.
+Conditional evaluates a boolean expression and annotates the outgoing data with the selected branch.
 
 - Config: required `expression` over `input.data`, up to 4096 characters.
 - Input: open object under `data`.
@@ -1045,9 +961,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 ### Function
 
-**Interviewer:** How do we support custom logic without making its output rigid?
-
-**Candidate:** Function executes JavaScript in isolation and may return any JSON value. Source is stored with the graph; a shared sandbox Lambda runs it — see the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
+Function executes JavaScript in isolation and may return any JSON value. Source is stored with the graph; a shared sandbox Lambda runs it — see the [Function isolation deep dive](#10-deep-dive-design-function-isolation).
 
 - Config: `runtime` is fixed to `js`; `source` is required and may be up to 65,536 characters. `config_schema` does **not** validate that `source` is syntactically valid JavaScript — that is deferred; the sandbox reports `RUNTIME_ERROR` at run time.
 - Timeout: 5 seconds by default, from 1 ms to 300 seconds.
@@ -1058,9 +972,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 ### General API
 
-**Interviewer:** What does the generic HTTP node need to describe?
-
-**Candidate:** It captures the request template and returns the upstream HTTP response through the common data envelope.
+It captures the request template and returns the upstream HTTP response through the common data envelope.
 
 - Config: required `method` and URI-template `url`.
 - Methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `QUERY`.
@@ -1074,9 +986,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 ### Response
 
-**Interviewer:** How does a workflow finish?
-
-**Candidate:** Response turns the final node input into the workflow's HTTP-style result and has no outgoing edge.
+Response turns the final node input into the workflow's HTTP-style result and has no outgoing edge.
 
 - Config: required HTTP status code, optional body template and headers.
 - Default status: `200`.
@@ -1087,9 +997,7 @@ For every node except Start input, runtime payloads use a top-level `data` field
 
 ### One error shape, specific error vocabularies
 
-**Interviewer:** How can the UI handle errors consistently if every node fails differently?
-
-**Candidate:** Every node uses the same envelope, then narrows `type`, `code`, and `details` for its own executor. Every node error requires:
+Every node uses the same envelope, then narrows `type`, `code`, and `details` for its own executor. Every node error requires:
 
 ```json
 {
@@ -1127,9 +1035,7 @@ This value is current operational state. It is cleared on retry or success. It i
 
 ### PostgreSQL entities
 
-**Interviewer:** Which tables hold the design and active execution state?
-
-**Candidate:** PostgreSQL owns workflow definitions and active run state through six core tables.
+PostgreSQL owns workflow definitions and active run state through six core tables.
 
 ```mermaid
 erDiagram
@@ -1215,9 +1121,7 @@ The diagram is a readable overview. In particular, version and node-name uniquen
 
 ### `node_types`
 
-**Interviewer:** Why have a node-type table instead of only an enum?
-
-**Candidate:** This is the seeded catalog of executable node kinds. It stores behavior contracts and degree bounds, not just a name.
+This is the seeded catalog of executable node kinds. It stores behavior contracts and degree bounds, not just a name.
 
 - UUID primary key and unique stable `type` slug;
 - category: `trigger`, `logic`, `action`, or `terminal`;
@@ -1229,9 +1133,7 @@ The catalog keeps node behavior extensible while `nodes` stays a generic graph t
 
 ### `workflows`
 
-**Interviewer:** What is the mutable object the user actually sees?
-
-**Candidate:** `workflows` is that container.
+`workflows` is that container.
 
 - identity, name, optional description, and lifecycle status;
 - `latest_version_id`, always present after atomic creation;
@@ -1244,9 +1146,7 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 
 ### `workflow_versions`
 
-**Interviewer:** Where do draft and published snapshots live?
-
-**Candidate:** Each `workflow_versions` row is one complete graph snapshot.
+Each `workflow_versions` row is one complete graph snapshot.
 
 - UUID identity and parent workflow;
 - integer `version`, monotonic within that workflow;
@@ -1257,9 +1157,7 @@ Workflow names are not unique. Different workflows may reasonably share a human 
 
 ### `nodes`
 
-**Interviewer:** How can a client node ID remain stable across v1 and v2?
-
-**Candidate:** A node ID is scoped by its version. Nodes use the composite primary key `(workflow_version_id, id)` and contain:
+A node ID is scoped by its version. Nodes use the composite primary key `(workflow_version_id, id)` and contain:
 
 - client-generated logical ID;
 - node type reference;
@@ -1272,9 +1170,7 @@ That is deliberate: `node_start` may exist in both v1 and v2 because it is the s
 
 ### `workflow_edges`
 
-**Interviewer:** Why keep edges in a separate table instead of self-relations on nodes?
-
-**Candidate:** Separate rows make direction, labels, branching, and future routing behavior explicit.
+Separate rows make direction, labels, branching, and future routing behavior explicit.
 
 - client-generated logical ID;
 - owning workflow version;
@@ -1286,9 +1182,7 @@ The primary key is `(workflow_version_id, id)`. Composite foreign keys from sour
 
 ### `workflow_runs`
 
-**Interviewer:** What is the minimum operational state needed for an execution?
-
-**Candidate:** A run is one execution of one published version. It stores:
+A run is one execution of one published version. It stores:
 
 - workflow and pinned version IDs;
 - state and trigger type;
@@ -1306,9 +1200,7 @@ We intentionally do not keep permanent node traces in this OLTP table. PostgreSQ
 
 ### Integrity now, performance indexes later
 
-**Interviewer:** Should we add every index we might eventually need?
-
-**Candidate:** Not yet. The v1 indexes encode known invariants:
+Not yet. The v1 indexes encode known invariants:
 
 - unique node-type slug;
 - unique version number per workflow;
@@ -1320,13 +1212,11 @@ Listing, status, timestamp, foreign-key, and worker-polling indexes depend on re
 
 ## 6. Deep-Dive Design: Execution
 
-This is the first deep dive: what exactly sits between "start a run" and "the run finished", and what happens when things break. The decisions here are drawn on the execution deep-dive section of the [orchex.excalidraw](./orchex.excalidraw) board.
+This deep dive covers the path from starting a run to finishing it, including failures. The [orchex.excalidraw](./orchex.excalidraw) execution board visualizes these decisions.
 
 ### The picture first
 
-**Interviewer:** Section 3 showed the execution service putting jobs into a queue and workers pulling them out. Is that still the whole story?
-
-**Candidate:** Almost, but one important thing changed: **workers never talk to the queue directly anymore.** Everything a worker decides is written to Postgres, and a small process called the relay moves jobs from Postgres into the queue. Here is the full flow:
+Almost, but one important thing changed: **workers never talk to the queue directly anymore.** Everything a worker decides is written to Postgres, and a small process called the relay moves jobs from Postgres into the queue. Here is the full flow:
 
 ```mermaid
 flowchart LR
@@ -1352,17 +1242,15 @@ The happy path, in words:
 5. The relay pushes that next job. Steps 3–5 repeat, one node at a time.
 6. When the Response node finishes, the worker marks the run `completed` and writes no next job. The loop simply stops.
 
-The queue stays dumb on purpose. Messages carry identity only — never data, never state. If the queue lost every message tomorrow, Postgres would still know exactly where every run stands.
+Messages carry identity only, never run data or state. If the queue lost every message, Postgres would still record each run's position.
 
 ### Why a task queue and not an event log?
 
-**Interviewer:** Systems at this scale often use an event log (a Kafka-style append-only stream). Why a task queue?
+Because our unit of work is a **job**, not a fact.
 
-**Candidate:** Because our unit of work is a **job**, not a fact.
+An event log is an ordered, replayable history. It suits analytics, audit, and dashboards, where many consumers need the same stream.
 
-An event log is a history: "this happened, then this happened." Consumers read it in order, at their own pace, and can replay it from the beginning. That is perfect when many readers need the same ordered stream — analytics, audit, dashboards.
-
-A task queue is a to-do list: "someone, do this once." Each message goes to exactly one worker, can be retried on its own, delayed on its own, and quarantined on its own if it is poisonous.
+A task queue assigns one job to one worker. It can retry, delay, or quarantine each message independently.
 
 Node jobs are to-dos, and the differences bite quickly if you pick the wrong tool:
 
@@ -1370,21 +1258,17 @@ Node jobs are to-dos, and the differences bite quickly if you pick the wrong too
 - **Per-message retry.** We retry, delay, and dead-letter individual jobs. Logs track a single read position per consumer — skipping one bad message while keeping the rest is painful.
 - **No replay wanted.** Replaying execution history would re-run side effects. Our source of truth for "where is this run?" is Postgres, not the message history.
 
-The design needs only three properties from the queue: at-least-once delivery, a per-message lease, and a dead-letter queue. Anything offering those fits — the concrete product is chosen at the [end of this deep dive](#which-queue-product-do-we-actually-use). The event log idea is not wasted either — it returns later as the pipe into ClickHouse for observability, where an ordered replayable history is exactly right.
+The queue needs at-least-once delivery, per-message leases, and a dead-letter queue. The [end of this deep dive](#which-queue-product-do-we-actually-use) selects the product. ClickHouse can later use an event log for ordered, replayable observability data.
 
 ### One queue or six?
 
-**Interviewer:** Six node types with very different speeds — milliseconds for a Conditional, up to 300 seconds for an API call. Separate queues per type?
+v1 uses one shared queue. Slow nodes usually wait on an external API or sandbox rather than consume CPU, so a worker can hold other jobs while waiting.
 
-**Candidate:** One shared queue for v1. The instinct to split comes from a fear: slow jobs clog the line and fast jobs starve behind them. But our slow nodes are slow because they **wait** — on someone else's API, on the sandbox — not because they compute. A worker waiting on an HTTP response can hold many other jobs at the same time, so slow jobs do not block fast ones in practice.
-
-Splitting would mean routing rules in the execution service, in every worker, and in the relay — real complexity for a problem we have not measured. And the escape hatch stays cheap: messages already carry `node_id`, so adding a routing rule later changes no contracts.
+Splitting adds routing rules to the execution service, workers, and relay without measured need. Messages already contain `node_id`, so a later routing rule preserves the contract.
 
 ### What is a lease, and which kind do we use?
 
-**Interviewer:** A worker takes a job and dies halfway. How does the job survive?
-
-**Candidate:** Through the queue's **lease**. When a worker takes a message, the message is not deleted — it becomes invisible for a while. If the worker finishes and says "done", it is deleted. If the worker never says "done", the message reappears and another worker gets it.
+Through the queue's **lease**. When a worker takes a message, the message is not deleted — it becomes invisible for a while. If the worker finishes and says "done", it is deleted. If the worker never says "done", the message reappears and another worker gets it.
 
 ```mermaid
 sequenceDiagram
@@ -1410,9 +1294,9 @@ We chose **(2) per-message leases**, sized from the node's configured timeout pl
 
 ### The same job arrives twice. Now what?
 
-**Interviewer:** Queues promise at-least-once delivery. So duplicates are guaranteed to happen eventually.
+**Queues promise at-least-once delivery. So duplicates are guaranteed to happen eventually.**
 
-**Candidate:** Yes — a lease that expires a moment too early, a "done" signal lost on the network. We do not try to prevent duplicates; we make them harmless with two checks in the worker.
+Yes — a lease that expires a moment too early, a "done" signal lost on the network. We do not try to prevent duplicates; we make them harmless with two checks in the worker.
 
 **Check 1 — before executing:** read the run from Postgres. If the run has already moved past this job's node and attempt, the job is stale. Drop it without executing anything.
 
@@ -1445,9 +1329,7 @@ The residual risk we accept: in a tight race both workers may have already fired
 
 ### The crash between two steps: the outbox
 
-**Interviewer:** After running a node the worker must save the checkpoint in Postgres _and_ enqueue the next job in the queue. Two systems — what if it crashes between the two?
-
-**Candidate:** Without protection, that crash freezes the run forever: the checkpoint says "at `node_response`" but no message for `node_response` exists anywhere, and the old message was already acked. The user sees a spinner that never ends.
+Without protection, that crash freezes the run forever: the checkpoint says "at `node_response`" but no message for `node_response` exists anywhere, and the old message was already acked. The user sees a spinner that never ends.
 
 Flipping the order does not help — enqueue first and crash before checkpointing, and the new job fails our own staleness check.
 
@@ -1472,9 +1354,7 @@ The outbox table is intentionally boring: rows are inserted once, read once, del
 
 ### Retrying failures automatically
 
-**Interviewer:** A node fails with a transient error — the API returned 500. Does the user really have to press Retry by hand?
-
-**Candidate:** No. But first, a distinction that keeps the whole design honest: there are **two separate failure worlds, and they never mix**.
+No. But first, a distinction that keeps the whole design honest: there are **two separate failure worlds, and they never mix**.
 
 **World 1 — the node's work failed, the worker is fine.** The API returned 500, the expression crashed, the token expired. The worker is alive to _report_ it through the structured error envelope, and this is the only world where `retryable` means anything.
 
@@ -1502,9 +1382,9 @@ stateDiagram-v2
 
 ### Poison messages and the dead-letter queue
 
-**Interviewer:** World 2 has a monster in it: a job that kills every worker that touches it. Out-of-memory on a huge payload, a crash bug. The lease "helpfully" resurrects it, and it kills again.
+**World 2 has a monster in it: a job that kills every worker that touches it. Out-of-memory on a huge payload, a crash bug. The lease "helpfully" resurrects it, and it kills again.**
 
-**Candidate:** That is a **poison message**, and the worker cannot defend itself — it is the one dying. The queue must give up on the job instead.
+That is a **poison message**, and the worker cannot defend itself — it is the one dying. The queue must give up on the job instead.
 
 The queue counts deliveries per message. A healthy message is delivered once, maybe twice after an unlucky lease expiry. A poison message racks up deliveries because no worker ever lives long enough to ack it. **After 5 deliveries, the queue stops redelivering and parks the message in the dead-letter queue.** The killing stops.
 
@@ -1528,10 +1408,6 @@ Parked messages are kept for 14 days as evidence — when someone asks "what kep
 
 ### One failure table to rule them all
 
-**Interviewer:** Summarize: for every place this can break, what saves us?
-
-**Candidate:**
-
 | Failure                                       | What saves us                                                        |
 | --------------------------------------------- | -------------------------------------------------------------------- |
 | Worker crashes before executing               | Lease expires → redelivered → fresh worker. Invisible.               |
@@ -1549,9 +1425,7 @@ Each layer lets the one above it be sloppy. The lease may redeliver, the relay m
 
 ### What this deep dive changed in the schema
 
-**Interviewer:** All of this machinery must live somewhere. What did the schema gain?
-
-**Candidate:** One new column, one new table, and one new index. Easiest to show with the run we have been using all along: Start → `node_api` → `node_response`, run `run_01`, pinned to version `ver_01`.
+One new column, one new table, and one new index. Easiest to show with the run we have been using all along: Start → `node_api` → `node_response`, run `run_01`, pinned to version `ver_01`.
 
 #### The new column: `workflow_runs.current_node_attempt`
 
@@ -1598,9 +1472,7 @@ Chain them together and an outbox row physically cannot point at the wrong graph
 
 #### The whole schema, after this deep dive
 
-**Interviewer:** Put it all together — what does the database look like now?
-
-**Candidate:** The six baseline tables from section 5, plus the outbox and the retry counter. Additions from this deep dive are marked `NEW`:
+The six baseline tables from section 5, plus the outbox and the retry counter. Additions from this deep dive are marked `NEW`:
 
 ```mermaid
 erDiagram
@@ -1705,9 +1577,7 @@ As before, [schema.dbml](./schema.dbml) is the fully specified version — times
 > [!IMPORTANT]
 > This decision is also drawn on the [orchex.excalidraw](./orchex.excalidraw) board — the options, tradeoffs, and the final SQS mapping in picture form.
 
-**Interviewer:** The design so far says "any queue with at-least-once delivery, a lease, and a DLQ fits." Time to name one. What are the options?
-
-**Candidate:** First, the honest shopping list. Because delay, retry scheduling, and ordering already live in Postgres, the queue must provide only four things:
+First, the honest shopping list. Because delay, retry scheduling, and ordering already live in Postgres, the queue must provide only four things:
 
 1. at-least-once delivery — never silently drop a message;
 2. a lease — message hidden while a worker holds it, back if the worker dies;
@@ -1716,9 +1586,7 @@ As before, [schema.dbml](./schema.dbml) is the fully specified version — times
 
 And it must **not** be asked to provide delays, retries, ordering, replay, or data transport. Messages are tiny identity envelopes at roughly 60–120 messages/second even at 1M runs/day, so throughput does not decide this. Lease mechanics, DLQ support, the HA story, and who operates it decide this.
 
-**Interviewer:** So walk the candidates.
-
-**Candidate:**
+**So walk the candidates.**
 
 | Option                                | Lease model                         | DLQ built in         | No SPOF                                    | Who operates it                                |
 | ------------------------------------- | ----------------------------------- | -------------------- | ------------------------------------------ | ---------------------------------------------- |
@@ -1756,9 +1624,7 @@ Occasional duplicate deliveries from a standard queue land on the guarded checkp
 
 ### How the lease is actually sized on SQS
 
-**Interviewer:** The lease decision said "per message, sized from the node's configured timeout, at enqueue time." Does SQS support that?
-
-**Candidate:** Almost — with one mechanical shift. SQS cannot set visibility per message at _send_ time; visibility is controlled at _receive_ time. So the sizing moves from the relay to the worker:
+Almost — with one mechanical shift. SQS cannot set visibility per message at _send_ time; visibility is controlled at _receive_ time. So the sizing moves from the relay to the worker:
 
 1. the queue's default visibility timeout stays short — say 60 seconds;
 2. the worker receives a message and looks at the node it is about to run;
@@ -1768,22 +1634,18 @@ Same outcome — fast jobs get quick rescue, slow jobs get room — sized by the
 
 ### Is the queue a single point of failure?
 
-**Interviewer:** We demanded "no SPOF." But the lease already survives worker deaths — do we truly need a highly available queue?
-
-**Candidate:** Worker failure and queue failure are different things, and the design tolerates them differently:
+Worker failure and queue failure are different things, and the design tolerates them differently:
 
 - **Queue unreachable:** the relay cannot push — outbox rows simply sit and buffer; workers cannot receive — runs stall and users see spinners. The moment the queue returns, everything drains and continues. Ugly, but self-healing.
 - **Queue loses an accepted message:** poisonous. The outbox row was already deleted after the push. The run says `running`, no message exists anywhere, and the DLQ watcher never sees it because nothing was dead-lettered — it vanished. That run is frozen forever.
 
-So the property we actually need is less "always answers" and more "never forgets": **durability of accepted messages**. SQS gives both — multi-AZ replication makes the frozen-run trap structurally impossible — which is why the availability question dissolved once the product was chosen.
+The required property is **durability of accepted messages**. SQS provides it with multi-AZ replication, preventing the frozen-run failure mode.
 
-One gap stays on the books: a **stalled-run sweeper** — a periodic job that finds runs stuck in `running` with no pending outbox row and no plausible in-flight lease, and re-mints the job from `current_node_id` + `current_node_attempt`. It is the only mechanism that would make "Postgres knows where every run stands" _actionable_, and it would also catch a message silently expiring after 14 days in the main queue. **Deferred, deliberately:** SQS's durability removes the scary version of the failure, and v1 stays small. It is recorded in [the deferred list](#8-deep-dives-still-to-come), not forgotten.
+A **stalled-run sweeper** remains deferred. It would find `running` runs with no pending outbox row or plausible in-flight lease, then create a job from `current_node_id` and `current_node_attempt`. It would also catch a main-queue message expiring after 14 days. SQS durability removes the primary risk; the item remains in [the deferred list](#8-deep-dives-still-to-come).
 
 ### What the DLQ watcher does with the evidence
 
-**Interviewer:** The DLQ keeps parked messages for 14 days as evidence, and the watcher reads them to mark runs failed. Can it do both?
-
-**Candidate:** Not naively — an SQS DLQ is just a regular queue, and a regular queue cannot be a to-do list and a filing cabinet at the same time. Delete the message after processing and the evidence vanishes; leave it and it reappears every visibility expiry, making the watcher re-process old news for 14 days.
+No. An SQS DLQ is a queue, not both a work list and evidence store. Deleting a processed message removes evidence; retaining it makes the watcher process it again at every visibility expiry for 14 days.
 
 The resolution: let the DLQ be the to-do list and let Postgres be the filing cabinet. The watcher
 
@@ -1796,22 +1658,18 @@ The evidence now lives forever, attached to the exact failed run, and the queue 
 
 ### The DLQ is never a work list
 
-**Interviewer:** Someday we may want automatic recovery instead of a human pressing Retry. Isn't the DLQ exactly the backlog we would process?
-
-**Candidate:** No — and the two failure worlds explain why. Retryable _node_ errors (500s, timeouts) already retry automatically through the outbox and never reach the DLQ. A DLQ message is a job with a proven record of _crashing five workers in a row_. Feeding it back automatically just crashes five more — an infinite worker-slaughter loop. The DLQ's entire purpose is to be where retrying **stops**.
+No. Retryable node errors, such as 500s and timeouts, retry through the outbox and never reach the DLQ. A DLQ message has crashed five workers in sequence. Replaying it automatically repeats that failure; the DLQ is where automatic retry stops.
 
 The legitimate futures both respect that:
 
 - **Ops redrive:** a bad deploy crashed workers, the fix shipped, 200 parked messages are innocent — a _human_ triggers SQS's DLQ redrive to move them back. After-the-fix, not automatic.
 - **Auto-recovery policy:** the DLQ watcher could someday schedule one delayed extra attempt instead of marking the run failed — by writing an **outbox row**, the same birth canal as every other job.
 
-The locked rule: **the DLQ is a quarantine and an evidence bag, never a work list. Jobs are born in exactly one place — the outbox.** Anything resurrecting a run — Retry button, ops redrive, future policy — mints a fresh job through Postgres, never by re-consuming the corpse. One birthplace is also what keeps attempt counters and guards trustworthy.
+**Rule: the DLQ quarantines evidence; the outbox creates jobs.** Retry, operations redrive, and future policy create a fresh Postgres outbox job. This preserves trustworthy attempt counters and guards.
 
 ### Why the relay still polls
 
-**Interviewer:** The relay queries Postgres every few hundred milliseconds, mostly finding nothing. Wasteful?
-
-**Candidate:** Less than it looks — an indexed query on a near-empty table costs microseconds; the real cost is up to one poll interval of added latency per hop. Two upgrades exist when we care:
+Less than it looks — an indexed query on a near-empty table costs microseconds; the real cost is up to one poll interval of added latency per hop. Two upgrades exist when we care:
 
 - `LISTEN`**/**`NOTIFY`**:** Postgres's built-in doorbell. A trigger on the outbox notifies on commit; the relay sleeps until rung. Near-zero latency — but a doorbell, not a mailbox: signals fired while the relay is down are gone, so a slow safety-net poll must stay. And delayed retry rows need a clock regardless — nothing rings when `available_at` comes due.
 - **CDC / logical decoding (Debezium-style):** subscribe to the WAL itself; durable and push-based, but it swaps a 30-line loop for replication slots to babysit and real infrastructure. Its natural moment is the ClickHouse pipeline later, not this relay.
@@ -1836,9 +1694,7 @@ Assumptions carried in from scale and execution:
 
 ### Why a relational database at all?
 
-**Interviewer:** Execution is write-heavy and we added an outbox, which means even more writes. Why not DynamoDB or Mongo and keep life simple?
-
-**Candidate:** The outbox does not remove the need for a database that can reject bad data. Two things must be true in the same commit: the run checkpoint advances, and the next job row exists. Different systems (Postgres and SQS) cannot share one commit, so we write checkpoint + outbox together, and the relay pushes to SQS later. Delay is fine; loss is not.
+The outbox does not remove the need for a database that can reject bad data. Two things must be true in the same commit: the run checkpoint advances, and the next job row exists. Different systems (Postgres and SQS) cannot share one commit, so we write checkpoint + outbox together, and the relay pushes to SQS later. Delay is fine; loss is not.
 
 NoSQL can do multi-item transactions. What we refuse to demote to application hope is:
 
@@ -1849,10 +1705,6 @@ Those are composite foreign keys and unique / partial-unique rules. On a documen
 
 ### What we need from the OLTP product
 
-**Interviewer:** In plain words, what must the product give us?
-
-**Candidate:**
-
 1. Real SQL transactions (checkpoint + outbox in one go).
 2. Foreign keys and unique rules as designed in [schema.dbml](./schema.dbml).
 3. A change stream later (CDC / Debezium) so we can replace the poll relay without rewriting the app.
@@ -1861,9 +1713,7 @@ Those are composite foreign keys and unique / partial-unique rules. On a documen
 
 ### Walk the market (simple language)
 
-**Interviewer:** Walk the options like you are explaining them to someone who does not live in database internals.
-
-**Candidate:**
+**Walk the options like you are explaining them to someone who does not live in database internals.**
 
 | Option                                    | What it is, in one breath                                         | Pros for Orchex                                                                                       | Cons / why it loses                                                                                                           |
 | ----------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
@@ -1882,9 +1732,7 @@ Those are composite foreign keys and unique / partial-unique rules. On a documen
 
 ### Why RDS PostgreSQL wins
 
-**Interviewer:** So compress that into the decision.
-
-**Candidate:**
+**So compress that into the decision.**
 
 1. **Relational Postgres is mandatory** for the integrity rules above — not optional polish.
 2. **AWS is home** because SQS is already the queue; AlloyDB/Spanner pull us into another cloud for no reason.
@@ -1896,9 +1744,7 @@ Those are composite foreign keys and unique / partial-unique rules. On a documen
 
 ### Did we check the size is enough?
 
-**Interviewer:** Fine philosophy. Can a small RDS actually take the write load?
-
-**Candidate:** We load-tested the real schema with an Orchex-shaped mix (checkpoint update + outbox insert + relay-style delete) under Docker CPU/RAM caps. Full notes live in [bench/postgres/results/](./bench/postgres/results/).
+We load-tested the real schema with an Orchex-shaped mix (checkpoint update + outbox insert + relay-style delete) under Docker CPU/RAM caps. Full notes live in [bench/postgres/results/](./bench/postgres/results/).
 
 Plain results for **10 hops/run** (so steady ≈ 100 hop TPS, peak ≈ 1000 hop TPS):
 
@@ -1913,9 +1759,7 @@ Memory was not the story: the active run table stayed small (tens of MB at 60k s
 
 ### What we are explicitly not deciding here
 
-**Interviewer:** What stays open?
-
-**Candidate:** Exact RDS instance class and Multi-AZ vs Single-AZ purchase options; parameter-group tuning (`shared_buffers`, connection pooling with RDS Proxy / PgBouncer); when to move the relay from poll to Debezium; any multi-region active-active topology. Those are operations follow-ups, not a reopen of “which database family.”
+Exact RDS instance class and Multi-AZ vs Single-AZ purchase options; parameter-group tuning (`shared_buffers`, connection pooling with RDS Proxy / PgBouncer); when to move the relay from poll to Debezium; any multi-region active-active topology. Those are operations follow-ups, not a reopen of “which database family.”
 
 ## 8. Deep-Dive Design: Graph Data Structure
 
@@ -1923,9 +1767,7 @@ Memory was not the story: the active run table stayed small (tens of MB at 60k s
 
 ### What do we actually store?
 
-**Interviewer:** A workflow is a graph. What data structure do we use for it?
-
-**Candidate:** A **directed adjacency list** — plain language: for every step, remember the set of steps that may run next.
+A **directed adjacency list** — plain language: for every step, remember the set of steps that may run next.
 
 ```mermaid
 flowchart LR
@@ -1938,7 +1780,7 @@ flowchart LR
   end
 ```
 
-Think of it as a phone book of “who comes after whom,” not a big matrix of every possible pair. Looking up the next steps for one node is cheap. Storage grows with the number of nodes plus the number of wires — not with “every node times every node.”
+The adjacency list maps each node to its successors. Looking up the next steps is cheap, and storage grows with nodes plus edges rather than every possible node pair.
 
 We keep edges **directed**. `A → B` means B may run after A. The reverse is a different wire. That matches execution: work flows forward, not both ways.
 
@@ -1950,9 +1792,7 @@ We keep edges **directed**. `A → B` means B may run after A. The reverse is a 
 
 ### How do in-degree and out-degree guide the builder?
 
-**Interviewer:** What do “in” and “out” mean for a node?
-
-**Candidate:** **Out-degree** is how many wires leave a node. **In-degree** is how many wires enter it.
+**Out-degree** is how many wires leave a node. **In-degree** is how many wires enter it.
 
 ```mermaid
 flowchart LR
@@ -1975,9 +1815,7 @@ Those rules are why v1 has **no merge**: two branches may not rejoin into one no
 
 ### Why must a published graph be a DAG?
 
-**Interviewer:** What breaks if someone wires a loop?
-
-**Candidate:** A **DAG** is a directed graph with **no cycles**. Publish requires that shape so execution can always make progress and so a topological order exists.
+A **DAG** is a directed graph with **no cycles**. Publish requires that shape so execution can always make progress and so a topological order exists.
 
 ```mermaid
 flowchart LR
@@ -2000,9 +1838,7 @@ Drafts may be messy while someone is drawing. **Publish** is where we insist: no
 
 ### How do we detect a cycle without drowning in theory?
 
-**Interviewer:** How do we know there is a loop?
-
-**Candidate:** Prefer **Kahn’s peel** — it matches how a scheduler thinks.
+Prefer **Kahn’s peel** — it matches how a scheduler thinks.
 
 1. Count unfinished dependencies for every node (that count is the in-degree).
 2. Put every node with **zero** unfinished dependencies in a ready queue (Start is always ready first).
@@ -2032,9 +1868,7 @@ Depth-first “three-color” walking can also find cycles (you walk into a step
 
 ### How does that become an execution order?
 
-**Interviewer:** Once we know it is a DAG, how do we decide what can run when?
-
-**Candidate:** A **topological order** lists every node so that for each wire `A → B`, A appears before B. That is one valid execution schedule.
+A **topological order** lists every node so that for each wire `A → B`, A appears before B. That is one valid execution schedule.
 
 ```mermaid
 flowchart LR
@@ -2047,9 +1881,7 @@ Kahn’s peel **is** that schedule: each time you peel a ready node, append it t
 
 ### Structure vs meaning — two layers
 
-**Interviewer:** Is the adjacency list enough by itself?
-
-**Candidate:** No. We keep two layers in sync:
+No. We keep two layers in sync:
 
 | Layer         | Holds                                         | Answers                                                 |
 | ------------- | --------------------------------------------- | ------------------------------------------------------- |
@@ -2059,10 +1891,6 @@ Kahn’s peel **is** that schedule: each time you peel a ready node, append it t
 Validation walks both: every wired node must have a type, every type must satisfy its in/out rules, and the whole graph must be a DAG. The builder canvas positions are layout only — they do not change execution.
 
 ### What we lock for v1
-
-**Interviewer:** What is settled for the graph structure itself?
-
-**Candidate:**
 
 1. **Directed adjacency list** as the working representation for validation and “what’s next.”
 2. **Typed degree rules** per node type (table above).
@@ -2077,9 +1905,7 @@ Postgres still owns durable truth (versioned `nodes` / `edges` rows). The adjace
 > [!IMPORTANT]
 > Where Orchex's long-running services run and how they scale. SQS and RDS are already on AWS, so compute stays there. Function-node sandboxing is settled in the [Function isolation deep dive](#10-deep-dive-design-function-isolation). Board: [orchex.excalidraw](./orchex.excalidraw).
 
-**Interviewer:** Builder, Execution, relay, DLQ watcher, and workers all need to run somewhere and scale independently. What are the options?
-
-**Candidate:** Two layers — **orchestrator** (keep N replicas healthy) and **capacity** (where CPU/RAM come from):
+Two layers — **orchestrator** (keep N replicas healthy) and **capacity** (where CPU/RAM come from):
 
 | Orchestrator                             | Capacity                                                  |
 | ---------------------------------------- | --------------------------------------------------------- |
@@ -2104,9 +1930,7 @@ APIs scale on ALB load; workers on SQS backlog. The **relay is a loop inside exe
 
 ### Decision: ECS on Fargate
 
-**Interviewer:** Lock it.
-
-**Candidate:**
+**Lock it.**
 
 1. **No host management in v1** — Fargate, not EC2.
 2. **ECS over EKS** — we do not need Kubernetes yet.
@@ -2120,9 +1944,7 @@ APIs scale on ALB load; workers on SQS backlog. The **relay is a loop inside exe
 > [!IMPORTANT]
 > How untrusted Function-node JavaScript is stored and executed. Workers stay on ECS Fargate; isolation is a shared Lambda sandbox that receives source + input and returns output. Board: [orchex.excalidraw](./orchex.excalidraw).
 
-**Interviewer:** Function nodes let users write JavaScript. Where does that code live, and what runs it?
-
-**Candidate:** Two separate decisions: **storage** (Orchex owns the definition) and **runtime** (a sandbox we deploy once and invoke). Publish freezes source with the graph. A run loads the pinned source and calls a shared sandbox with `{ source, input }` — it does **not** create a new AWS Lambda per Function node.
+Two separate decisions: **storage** (Orchex owns the definition) and **runtime** (a sandbox we deploy once and invoke). Publish freezes source with the graph. A run loads the pinned source and calls a shared sandbox with `{ source, input }` — it does **not** create a new AWS Lambda per Function node.
 
 ```mermaid
 flowchart TB
@@ -2142,9 +1964,7 @@ User code is **data in Postgres**. The Lambda is **our** sandbox — one deploy,
 
 ### Where do we store Function source?
 
-**Interviewer:** Postgres or S3?
-
-**Candidate:** **Postgres for v1.** The Function contract already caps `source` at 65,536 characters — a single JS body, not a multi-file package. That belongs with the published graph:
+**Postgres for v1.** The Function contract already caps `source` at 65,536 characters — a single JS body, not a multi-file package. That belongs with the published graph:
 
 - draft edit and publish stay one transactional model;
 - a run pins a `workflow_version`, so the exact source is already on that version's node row;
@@ -2178,9 +1998,7 @@ AWS still stores **our** sandbox deployment (zip in Lambda-managed storage). Tha
 
 ### Why not CreateFunction per Function node on publish?
 
-**Interviewer:** Publish could zip each Function node and call `CreateFunction` / `PublishVersion`, then invoke by ARN. Why reject that?
-
-**Candidate:** That maps "function" to "AWS Lambda" the way a developer deploys an app. Orchex Function nodes are **n8n-style snippets** — source + last-step JSON in, JSON out — not Twenty Apps-style packages with per-function IAM, layers, and SDK clients.
+That maps "function" to "AWS Lambda" the way a developer deploys an app. Orchex Function nodes are **n8n-style snippets** — source + last-step JSON in, JSON out — not Twenty Apps-style packages with per-function IAM, layers, and SDK clients.
 
 ```mermaid
 flowchart TB
@@ -2214,9 +2032,7 @@ We only need: **run this source with this input in an isolated environment.** Us
 
 ### Why a shared Lambda sandbox?
 
-**Interviewer:** So what do we deploy?
-
-**Candidate:** **One (or a few) Lambda functions we own** — e.g. `orchex-function-sandbox` — deployed as Orchex infra. The handler accepts source and input, runs the snippet under timeout/memory limits, and returns output (or a structured error).
+**One (or a few) Lambda functions we own** — e.g. `orchex-function-sandbox` — deployed as Orchex infra. The handler accepts source and input, runs the snippet under timeout/memory limits, and returns output (or a structured error).
 
 ```mermaid
 sequenceDiagram
@@ -2244,9 +2060,7 @@ MicroVMs (E2B/Firecracker) remain a later hardening option if we need stronger i
 
 ### Ramp vs account concurrency
 
-**Interviewer:** One sandbox Lambda scales somehow. What are the limits?
-
-**Candidate:** Two different ceilings — do not conflate them.
+Two different ceilings — do not conflate them.
 
 | Lever                               | Default (typical)                                                         | Adjustable?                                          | Meaning                                              |
 | ----------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------- |
@@ -2292,9 +2106,7 @@ Optional later: **reserved concurrency** on the sandbox (guarantee a slice of th
 
 ### Sharding sandbox Lambdas
 
-**Interviewer:** If we need ~6,000 new environments in 10 seconds, the ramp is only +1,000 per function. What then?
-
-**Candidate:** The ramp is **per function**. N independent sandbox functions each get their own +1,000 / 10s:
+The ramp is **per function**. N independent sandbox functions each get their own +1,000 / 10s:
 
 ```mermaid
 flowchart LR
@@ -2321,9 +2133,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 
 ### Decision: shared sandbox + Postgres source
 
-**Interviewer:** Lock it.
-
-**Candidate:**
+**Lock it.**
 
 1. **Store** Function `source` in **Postgres** with the versioned node (S3 later for large artifacts only).
 2. **Do not** `CreateFunction` per Function node on publish — user code is data.
@@ -2336,9 +2146,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 
 ## 11. Deep Dives Still To Come
 
-**Interviewer:** Is everything settled now?
-
-**Candidate:** No. The execution spine, the queue product, the OLTP database product, the graph data-structure model, the control-plane compute product (ECS on Fargate), and Function isolation (Postgres source + shared Lambda sandbox) are settled; these are next:
+No. The execution spine, the queue product, the OLTP database product, the graph data-structure model, the control-plane compute product (ECS on Fargate), and Function isolation (Postgres source + shared Lambda sandbox) are settled; these are next:
 
 - pause/stop: soft pause is settled in [Pause](#pause) (status flip only; in-flight last hop may still complete); hard interrupt of long-running nodes remains open;
 - ClickHouse event, trace, retention, and correlation schemas;
@@ -2346,9 +2154,7 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - authorization, tenancy, quotas, and data isolation;
 - production query patterns and performance indexes.
 
-**Interviewer:** Which product and API decisions are intentionally deferred?
-
-**Candidate:** Keeping v1 small is part of the design:
+Keeping v1 small is part of the design:
 
 - webhook and scheduler trigger APIs;
 - Agent, Router, Scheduler, and Integration Action nodes;
@@ -2371,13 +2177,9 @@ v1 starts with **one** sandbox function and a raised account concurrency quota. 
 - S3-backed Function artifacts and multi-sandbox sharding until load requires them;
 - Function `source` code validation (parse / lint / type-check). v1 `config_schema` only requires a non-empty string ≤ 65,536 characters; invalid JS is not rejected on save or publish.
 
-These are not hidden assumptions. They are the next decisions the design needs.
+These decisions remain open.
 
 ## Repository Map
-
-**Interviewer:** Where can I inspect the source material behind these decisions?
-
-**Candidate:**
 
 - [orchex.excalidraw](./orchex.excalidraw) — authoritative architecture, API, schema, execution deep-dive, queue-product, OLTP/RDS, graph data-structure, control-plane compute (ECS on Fargate), and Function isolation board.
 - [schema.dbml](./schema.dbml) — PostgreSQL OLTP schema.
@@ -2386,4 +2188,4 @@ These are not hidden assumptions. They are the next decisions the design needs.
 - [node-type-schemas](./node-type-schemas) — JSON Schema contracts for the v1 node types (including Function `source`).
 - [data-structure](./data-structure) — Go graph sketches and learning notes behind the graph data-structure deep dive.
 
-The design has one recurring principle: let drafts be easy to build, make published workflows safe to run, and never lose the exact point from which a failed run should continue.
+Drafts stay easy to build, published workflows stay safe to run, and failed runs retain their exact resume point.

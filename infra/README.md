@@ -1,6 +1,6 @@
 # Orchex infrastructure
 
-Terraform for AWS resources. Provisions:
+Terraform provisions the following AWS resources:
 
 - **ECR** — `orchex-builder-api`, `orchex-execution-api`, `orchex-execution-worker`, and `orchex-db-migrate` (goose migrations)
 - **ECS Fargate** — shared cluster, builder and execution **API services** (behind ALB), internal **execution-worker** (no ALB), and migrate **run-task** definition
@@ -10,7 +10,7 @@ Terraform for AWS resources. Provisions:
 - **RDS PostgreSQL 17** — `orchex-postgres` (private, master password in Secrets Manager)
 - **ALB** — HTTP :80 with path rules to builder and execution on `:8080`; unmatched paths return 404. The worker is not on the ALB.
 
-Terraform creates and wires the infrastructure. Container images are built with Docker and pushed to ECR separately (see [Lifecycle](#lifecycle)).
+Terraform creates and connects the infrastructure. Build and push container images to ECR separately; see [Lifecycle](#lifecycle).
 
 ## Layout
 
@@ -110,11 +110,11 @@ All resources receive provider default tags plus module-level tags:
 | `Component`   | per module        | `ecr`, `alb`, `ecs`, `ecs-service`, `ecs-run-task`, `sqs`, `lambda`, `rds`, `secrets-manager` |
 | `Name`        | per resource      | `orchex-postgres`, `orchex-builder-api`                                                       |
 
-App-specific resources use `Service = builder-api` or `Service = execution-api`. The worker is tagged `Service = execution-api`. Shared infrastructure (ALB, ECS cluster, RDS, SQS, migrate ECR/task, app secret) uses `Service = shared`.
+App resources use `Service = builder-api` or `Service = execution-api`; the worker uses `execution-api`. The ALB, ECS cluster, RDS, SQS, migrate ECR/task, and app secret use `Service = shared`.
 
 ## Infrastructure architecture
 
-Root `main.tf` composes the modules above. Public traffic flows from the ALB to Fargate **API** tasks. The **worker** is internal (no ALB). Tasks reach RDS over the VPC using a shared **`data_plane_client`** security group. Execution-api and the worker talk to SQS with the task role (no static AWS keys). The worker may `Invoke` the shared Function sandbox Lambda; the Lambda is not in a VPC (outbound internet). Database credentials reach tasks via the shared **`orchex/DATABASE_URL`** secret (not the RDS master secret).
+Root `main.tf` composes these modules. The ALB sends public traffic to Fargate **API** tasks; the **worker** is internal. Tasks reach RDS through the shared **`data_plane_client`** security group. Execution-api and the worker use task-role access to SQS. The worker invokes the shared Function sandbox Lambda, which is outside the VPC for outbound internet access. Tasks receive database credentials from `orchex/DATABASE_URL`, not the RDS master secret.
 
 ### Runtime architecture
 
@@ -183,7 +183,7 @@ flowchart TB
   SG -.- MIG
 ```
 
-Solid arrows are request, queue, or database traffic. Dotted arrows are image pulls or security-group attachment (API, worker, and migrate tasks use **`data_plane_client`** for RDS access). The worker is not registered with the ALB.
+Solid arrows show request, queue, or database traffic. Dotted arrows show image pulls or security-group attachment. API, worker, and migrate tasks use **`data_plane_client`** for RDS access; the worker is not registered with the ALB.
 
 ### Secrets and bootstrap
 
@@ -303,8 +303,8 @@ ECS **task execution roles** get `secretsmanager:GetSecretValue` on `orchex/DATA
 ### `modules/lambda_sandbox`
 
 - Wraps [terraform-aws-modules/lambda/aws](https://registry.terraform.io/modules/terraform-aws-modules/lambda/aws) v8.1.2.
-- One zip function **`orchex-function-sandbox`**: `nodejs24.x`, handler `index.handler`, source [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src). Terraform zips that directory on apply (no manual zip, no ECR, **`store_on_s3` off**). AWS stores the deployment package in Lambda-managed storage — not an S3 bucket in this account. Local zip artifacts land in `infra/builds/` (gitignored; module default `artifacts_dir`).
-- **Invoke contract (sync):** workers call `Invoke` with `{ source, input, timeout_ms }`. User Function `source` is data (Postgres at run time), not files in the zip. The zip is only our sandbox. `index.js` validates **runtime `input`** (`{ data: object }` only); it does not re-check draft config (`source` / `timeout_ms`).
+- One zip function **`orchex-function-sandbox`** uses `nodejs24.x`, handler `index.handler`, and [`modules/lambda_sandbox/src`](modules/lambda_sandbox/src). Terraform zips that directory during apply; no manual zip or ECR is involved, and **`store_on_s3` is off**. AWS stores the package in Lambda-managed storage, while local artifacts go to the gitignored `infra/builds/` module-default `artifacts_dir`.
+- **Synchronous invoke contract:** workers call `Invoke` with `{ source, input, timeout_ms }`. Function `source` is runtime Postgres data, not a zip file. The zip contains only the sandbox. `index.js` validates runtime `input` (`{ data: object }` only), not draft config (`source` / `timeout_ms`).
 - **Timeout 300s** (Function node `timeout_ms` max is 300000). **128 MB**. **x86_64**. **`publish = false`** (no versions; invoke `$LATEST`).
 - **Not in a VPC** — the sandbox can reach the public internet.
 - CloudWatch Logs retention **7 days**. Lambda execution role is **logs only**.
